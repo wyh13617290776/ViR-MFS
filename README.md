@@ -28,3 +28,27 @@ pip install -r requirements.txt
 
 ---
 
+## 📂 Dataset Preparation
+
+We evaluate our method on the **MSRS** and **FMB** datasets. 
+
+1. Download the datasets from the following links:
+   - [MSRS Dataset Link](https://github.com/Linfeng-Tang/MSRS)
+   - [FMB Dataset Link](Google Drive：https://drive.google.com/drive/folders/1T_jVi80tjgyHTQDpn-TjfySyW4CK1LlF；
+     Baidu Yun：https://pan.baidu.com/s/1k7PgCsSJVZJIoIhgMjWxNg?pwd=IVIF#list/path=%2F)
+   
+   *(Note: The original copyrights of the datasets belong to their respective authors. We provide these links solely to facilitate reproducibility.)*
+
+2. Organize the downloaded datasets in the `datasets/` directory as follows:
+
+```text
+ViR-MFS/
+├── datasets/
+│   ├── MSRS/
+│   │   ├── Infrared/
+│   │   ├── Visible/
+│   │   └── Label/
+│   └── FMB/
+│       ├── Infrared/
+│       ├── Visible/
+│       └── Label/
