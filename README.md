@@ -39,45 +39,81 @@ We evaluate our method on the **MSRS** and **FMB** datasets.
    
    *(Note: The original copyrights of the datasets belong to their respective authors. We provide these links solely to facilitate reproducibility.)*
 
-2. Organize the downloaded datasets in the `datasets/` directory as follows:
+2. Organize the downloaded datasets in the `datasets/` directory strictly as follows to match the data loading logic:
 
 ```text
 ViR-MFS/
 ├── datasets/
 │   ├── MSRS/
 │   │   ├── Infrared/
+│   │   │   ├── train/MSRS/
+│   │   │   └── test/MSRS/
 │   │   ├── Visible/
+│   │   │   ├── train/MSRS/
+│   │   │   └── test/MSRS/
 │   │   └── Label/
+│   │       ├── train/MSRS/
+│   │       └── test/MSRS/
 │   └── FMB/
-│       ├── Infrared/
-│       ├── Visible/
+│       ├── ir/
+│       │   ├── train/
+│       │   └── test/
+│       ├── vi/
+│       │   ├── train/
+│       │   └── test/
 │       └── Label/
-```
+│           ├── train/
+│           └── test/
 
 ---
 
 ## ⚙️ Quick Start
 
-### Training
-To train the ViR-MFS model from scratch using the proposed alternating meta-learning optimization strategy, please run:
+### 1. Configure Dataset Paths
+Since our data loading strategy currently uses absolute paths, please open `dataloder.py` and modify the paths to match the location of your downloaded datasets before running the code. 
 
-```bash
-python train.py --dataset MSRS --batch_size 8 --epochs 300
+For example, update the `vi_dir`, `ir_dir`, and `label_dir` in both the `vifs_dataloder` (for training) and `vifs_dataloder_test` (for testing) classes:
+```python
+# In dataloder.py
+self.vi_dir = os.path.join(rf'/your_local_path/MSRS/Visible/{task}/MSRS')
+self.ir_dir = os.path.join(rf'/your_local_path/MSRS/Infrared/{task}/MSRS')
+self.label_dir = os.path.join(rf'/your_local_path/MSRS/Label/{task}/MSRS')
 ```
-*(Modify the `--dataset` and other hyper-parameters as needed according to your local environment.)*
 
-### Evaluation
-To evaluate the fusion and segmentation performance using our pre-trained weights, please run:
+### 2. Training
+Once the dataset paths are correctly configured, you can start training the ViR-MFS model from scratch by running:
 
 ```bash
-python test.py --dataset MSRS --checkpoint_path ./weights/best_model.pth
+python train.py --batch_size 8 --epochs 300
+```
+*(Note: You can adjust the batch size and epochs in the command line or directly within `train.py` depending on your GPU memory capacity.)*
+
+### 3. Evaluation
+Since the evaluation parameters are currently hardcoded, please open `test.py` and navigate to the `if __name__ == '__main__':` block at the bottom of the file. Update the parameters such as `model_path`, `save_dir`, and `num_classes` according to the dataset you want to test:
+
+```python
+# In test.py
+if __name__ == '__main__':
+    test_model(
+        model_path='./weights/FMB_pth/fmb_b0.pth',  # Path to your downloaded/trained weights
+        batch_size=1,
+        save_dir='test_results',                # Output directory for fused images and seg maps
+        num_classes=17,                         # 9 for MSRS, 17 for FMB
+        use_dataparallel=True                   # Set to False if using a single GPU
+    )
+```
+
+After modifying the parameters and ensuring the test data paths in `dataloder.py` are correct, run the evaluation script:
+
+```bash
+python test.py
 ```
 
 ---
 
 ## 🔗 Pre-trained Models
 
-For quick inference and reproduction of the results reported in our paper, you can download our pre-trained weights from [Google Drive]([在这里填入你按照流程生成的 Google Drive 分享链接]) and place them in the `./weights` folder.
+For quick inference and reproduction of the results reported in our paper, you can download our pre-trained weights from [Google Drive](https://drive.google.com/drive/folders/11dXQ-pkYgPVe9qD4AXCpv-XIn5JZIMGh?usp=sharing) and place them in the `./weights` folder.
 
 ---
 
@@ -88,7 +124,7 @@ If you find this code, our dataset processing, or our methodology useful in your
 ```bibtex
 @article{ViRMFS2026,
   title={Wavelet-Driven Meta-Learning: Unifying Infrared-Visible Fusion and Semantic Segmentation for Robust Scene Perception},
-  author={[你的全拼姓名, 例如 San Zhang] and [合著者1全拼] and [合著者2全拼]},
+  author={[Yihui Wang] and [Dengshi li] and [Shichao Liu] and [Shiwei Hu] and [Zhiming Zhan]},
   journal={The Visual Computer},
   year={2026}
 }
@@ -98,4 +134,4 @@ If you find this code, our dataset processing, or our methodology useful in your
 
 ## 📧 Contact
 
-If you have any questions about the code or paper, please feel free to open an issue or contact `[你的电子邮箱地址]`.
+If you have any questions about the code or paper, please feel free to open an issue or contact `[wyh37133@gmail.com]`.
