@@ -20,7 +20,7 @@ Please ensure you have Python 3.8+ and PyTorch installed. We recommend using Con
 
 ```bash
 # Clone the repository
-git clone https://github.com/[你的GitHub用户名]/ViR-MFS.git
+git clone https://github.com/wyh13617290776/ViR-MFS.git
 cd ViR-MFS
 
 # Install dependencies
