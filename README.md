@@ -124,7 +124,7 @@ If you find this code, our dataset processing, or our methodology useful in your
 ```bibtex
 @article{ViRMFS2026,
   title={Wavelet-Driven Meta-Learning: Unifying Infrared-Visible Fusion and Semantic Segmentation for Robust Scene Perception},
-  author={Yihui Wang and Dengshi li and Shichao Liu and Shiwei Hu and Zhiming Zhan},
+  author={Yihui Wang and Dengshi Li and Shichao Liu and Shiwei Hu and Zhiming Zhan},
   journal={The Visual Computer},
   year={2026}
 }
