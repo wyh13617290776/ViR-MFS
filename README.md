@@ -34,8 +34,8 @@ pip install -r requirements.txt
 We evaluate our method on the **MSRS** and **FMB** datasets. 
 
 1. Download the datasets from the following links:
-   - [MSRS Dataset Link]([https://github.com/Linfeng-Tang/MSRS])
-   - [FMB Dataset Link](Google Drive：[https://drive.google.com/drive/folders/1T_jVi80tjgyHTQDpn-TjfySyW4CK1LlF]；Baidu Yun：[https://pan.baidu.com/s/1k7PgCsSJVZJIoIhgMjWxNg?pwd=IVIF#list/path=%2F])
+   - [MSRS Dataset Link](https://github.com/Linfeng-Tang/MSRS)
+   - [FMB Dataset Link]([在这里填入你准备好的 FMB 网盘链接])
    
    *(Note: The original copyrights of the datasets belong to their respective authors. We provide these links solely to facilitate reproducibility.)*
 
@@ -47,11 +47,11 @@ ViR-MFS/
 │   ├── MSRS/
 │   │   ├── Infrared/
 │   │   ├── Visible/
-│   │   └── Labels/
+│   │   └── Label/
 │   └── FMB/
 │       ├── Infrared/
 │       ├── Visible/
-│       └── Labels/
+│       └── Label/
 ```
 
 ---
