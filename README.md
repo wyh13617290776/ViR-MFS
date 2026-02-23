@@ -20,11 +20,12 @@ Please ensure you have Python 3.8+ and PyTorch installed. We recommend using Con
 
 ```bash
 # Clone the repository
-git clone https://github.com/wyh13617290776/ViR-MFS.git
+git clone https://github.com/[你的GitHub用户名]/ViR-MFS.git
 cd ViR-MFS
 
 # Install dependencies
 pip install -r requirements.txt
+```
 
 ---
 
@@ -33,9 +34,8 @@ pip install -r requirements.txt
 We evaluate our method on the **MSRS** and **FMB** datasets. 
 
 1. Download the datasets from the following links:
-   - [MSRS Dataset Link](https://github.com/Linfeng-Tang/MSRS)
-   - [FMB Dataset Link](Google Drive：https://drive.google.com/drive/folders/1T_jVi80tjgyHTQDpn-TjfySyW4CK1LlF；
-     Baidu Yun：https://pan.baidu.com/s/1k7PgCsSJVZJIoIhgMjWxNg?pwd=IVIF#list/path=%2F)
+   - [MSRS Dataset Link]([在这里填入你准备好的 MSRS 网盘链接])
+   - [FMB Dataset Link]([在这里填入你准备好的 FMB 网盘链接])
    
    *(Note: The original copyrights of the datasets belong to their respective authors. We provide these links solely to facilitate reproducibility.)*
 
@@ -47,8 +47,55 @@ ViR-MFS/
 │   ├── MSRS/
 │   │   ├── Infrared/
 │   │   ├── Visible/
-│   │   └── Label/
+│   │   └── Labels/
 │   └── FMB/
 │       ├── Infrared/
 │       ├── Visible/
-│       └── Label/
+│       └── Labels/
+```
+
+---
+
+## ⚙️ Quick Start
+
+### Training
+To train the ViR-MFS model from scratch using the proposed alternating meta-learning optimization strategy, please run:
+
+```bash
+python train.py --dataset MSRS --batch_size 8 --epochs 300
+```
+*(Modify the `--dataset` and other hyper-parameters as needed according to your local environment.)*
+
+### Evaluation
+To evaluate the fusion and segmentation performance using our pre-trained weights, please run:
+
+```bash
+python test.py --dataset MSRS --checkpoint_path ./weights/best_model.pth
+```
+
+---
+
+## 🔗 Pre-trained Models
+
+For quick inference and reproduction of the results reported in our paper, you can download our pre-trained weights from [Google Drive]([在这里填入你按照流程生成的 Google Drive 分享链接]) and place them in the `./weights` folder.
+
+---
+
+## 📝 Citation
+
+If you find this code, our dataset processing, or our methodology useful in your research, please kindly consider citing our manuscript submitted to *The Visual Computer*:
+
+```bibtex
+@article{ViRMFS2026,
+  title={Wavelet-Driven Meta-Learning: Unifying Infrared-Visible Fusion and Semantic Segmentation for Robust Scene Perception},
+  author={[你的全拼姓名, 例如 San Zhang] and [合著者1全拼] and [合著者2全拼]},
+  journal={The Visual Computer},
+  year={2026}
+}
+```
+
+---
+
+## 📧 Contact
+
+If you have any questions about the code or paper, please feel free to open an issue or contact `[你的电子邮箱地址]`.
