@@ -64,6 +64,7 @@ ViR-MFS/
 │       └── Label/
 │           ├── train/
 │           └── test/
+```
 ---
 
 ## ⚙️ Quick Start
