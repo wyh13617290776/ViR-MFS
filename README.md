@@ -70,7 +70,7 @@ ViR-MFS/
 ## ⚙️ Quick Start
 
 ### 1. Configure Dataset Paths
-Since our data loading strategy currently uses absolute paths, please open `dataloder.py` and modify the paths to match the location of your downloaded datasets before running the code. 
+Since our data loading strategy currently uses absolute paths, please open `dataloder.py` and modify the paths to match the location of your downloaded datasets before running the code.
 
 For example, update the `vi_dir`, `ir_dir`, and `label_dir` in both the `vifs_dataloder` (for training) and `vifs_dataloder_test` (for testing) classes:
 ```python
@@ -124,7 +124,7 @@ If you find this code, our dataset processing, or our methodology useful in your
 ```bibtex
 @article{ViRMFS2026,
   title={Wavelet-Driven Meta-Learning: Unifying Infrared-Visible Fusion and Semantic Segmentation for Robust Scene Perception},
-  author={[Yihui Wang] and [Dengshi li] and [Shichao Liu] and [Shiwei Hu] and [Zhiming Zhan]},
+  author={Yihui Wang and Dengshi li and Shichao Liu and Shiwei Hu and Zhiming Zhan},
   journal={The Visual Computer},
   year={2026}
 }
@@ -134,4 +134,4 @@ If you find this code, our dataset processing, or our methodology useful in your
 
 ## 📧 Contact
 
-If you have any questions about the code or paper, please feel free to open an issue or contact `[wyh37133@gmail.com]`.
+If you have any questions about the code or paper, please feel free to open an issue or contact `wyh37133@gmail.com`.
