@@ -1,0 +1,14 @@
+# 预训练权重
+model_data/
+
+# 训练得到的模型权重
+runs/
+runs_meta/
+
+# 测试结果（融合和分割图像）
+test_results/
+
+# Python 缓存与虚拟环境
+__pycache__/
+*.pyc
+.DS_Store
