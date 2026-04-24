@@ -13,8 +13,8 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 from torch import optim
 from torch.cuda.amp import autocast, GradScaler
-from torch.nn.utils.stateless import functional_call # torch 1.x用法
-# from torch.func import functional_call # torch 2.x新用法
+# from torch.nn.utils.stateless import functional_call # torch 1.x用法
+from torch.func import functional_call # torch 2.x新用法
 from tqdm import tqdm
 
 from data_pipeline.dataloader import VIFSDataset
