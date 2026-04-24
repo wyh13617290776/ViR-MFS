@@ -3,6 +3,11 @@
 # ==========================================
 model_name: "SegFormer"                                     # 算法/模型架构名称 (用于目录分级)
 
+# ========== 骨干网络配置 ==========
+backbone:
+  phi: "b0"                                                 # backbone 版本: b0, b1, b2, b3
+  pretrained_dir: "model_data"                              # 预训练权重的存放目录
+
 dataset:
   name: "MSRS"                                              # 当前使用的数据集名称
   root_dir: "/home/wyh/Projects/workspace/ViR_MFS/datasets" # 数据集根目录
@@ -15,4 +20,4 @@ test:
   # 【智能寻址】
   # 方式1 (快捷): 只写 "best_mIoU" 或 "meta_latest"，代码会自动拼接
   # 方式2 (自定义): 直接写完整名称如 "my_custom_weights.pth"
-  checkpoint_name: "msrs_b3_meta_modify_2.pth"
+  checkpoint_name: "msrs_b0_meta_modify_1.pth"

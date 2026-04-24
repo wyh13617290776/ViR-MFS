@@ -27,13 +27,14 @@ def save_image(tensor, path):
 def test_model():
     cfg, params = load_configs()
     dataset_cfg = cfg['dataset']
+    exp = cfg['backbone']['phi']
     p_test = params['test']
 
     # 获取文件夹分级用的架构名
     model_arch = cfg.get('model_name')
     
     # === 1. 动态构建路径 ===
-    exp_name = f"{dataset_cfg['name']}_{p_test['phi']}"
+    exp_name = f"{dataset_cfg['name']}_{exp}"
 
     # ---------------------------------------------------------
     # 智能权重寻址逻辑
@@ -82,7 +83,7 @@ def test_model():
     test_loader = DataLoader(test_dataset, batch_size=p_test['batch_size'], shuffle=False, num_workers=p_test['num_workers'])
 
     # === 3. 初始化并加载模型 ===
-    model = SegFormer(num_classes=p_test['num_classes'], phi=p_test['phi'])
+    model = SegFormer(num_classes=p_test['num_classes'])
     
     if os.path.exists(model_path):
         # 兼容包含 "module." 前缀的 DataParallel 保存格式

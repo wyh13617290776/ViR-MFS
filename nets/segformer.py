@@ -10,6 +10,8 @@ import torch.nn.functional as F
 from .backbone import mit_b0, mit_b1, mit_b2, mit_b3, mit_b4, mit_b5
 from .wtconv2d import WTConv2d_VIF
 
+import os
+from config_loader import load_configs
 
 class MLP(nn.Module):
     """
@@ -85,20 +87,32 @@ class SegFormerHead(nn.Module):
         return x
 
 class SegFormer(nn.Module):
-    def __init__(self, num_classes: int, phi = 'b0', pretrained = True):
+    def __init__(self, num_classes: int, pretrained = False):
         super(SegFormer, self).__init__()
+
+        # load config
+        cfg, _ = load_configs()
+        backbone_phi = cfg['backbone']['phi']
+        pretrained_dir = cfg['backbone']['pretrained_dir']
+
+        backbone_weight_path = None
+        if pretrained:
+            backbone_weight_path = os.path.join(pretrained_dir, f"segformer_{backbone_phi}_backbone_weights.pth")
+        
+        ext_backbones = {
+            'b0': mit_b0, 'b1': mit_b1, 'b2': mit_b2,
+            'b3': mit_b3, 'b4': mit_b4, 'b5': mit_b5
+        }
+        
         self.in_channels = {
             'b0': [32, 64, 160, 256], 'b1': [64, 128, 320, 512], 'b2': [64, 128, 320, 512],
             'b3': [64, 128, 320, 512], 'b4': [64, 128, 320, 512], 'b5': [64, 128, 320, 512],
-        }[phi]
-        self.backbone   = {
-            'b0': mit_b0, 'b1': mit_b1, 'b2': mit_b2,
-            'b3': mit_b3, 'b4': mit_b4, 'b5': mit_b5,
-        }[phi](pretrained)
+        }[backbone_phi]
+        self.backbone = ext_backbones[backbone_phi](pretrained_path=backbone_weight_path)
         self.embedding_dim   = {
             'b0': 256, 'b1': 256, 'b2': 768,
             'b3': 768, 'b4': 768, 'b5': 768,
-        }[phi]
+        }[backbone_phi]
         self.decode_head = SegFormerHead(num_classes, self.in_channels, self.embedding_dim)
         self.fusion_head = SegFormerHead(2, self.in_channels, self.embedding_dim)
 
@@ -127,21 +141,21 @@ class SegFormer(nn.Module):
         torch.Size([4, 320, 40, 30])
         torch.Size([4, 512, 20, 15])
         '''
-        # ---------------- 训练和测试的modify_1 ----------------
-        # f_feature = x
-        # f_feature[0] = self.f0(x[0], x_ir[0])
-        # f_feature[1] = self.f1(x[1], x_ir[1])
-        # f_feature[2] = self.f2(x[2], x_ir[2])
-        # f_feature[3] = self.f3(torch.cat([x[3],x_ir[3]],dim=1))
-        # ---------------- SegFormer-b0 ----------------
-
-        # ---------------- 训练和测试的modify_2 ----------------
+        # ---------------- 训练和测试的modify_1（二选一） ----------------
         f_feature = x
-        f_feature[0] = self.f0(x[0], x_ir[0]) + self.f0(x_ir[0], x[0])
-        f_feature[1] = self.f1(x[1], x_ir[1])+ self.f1(x_ir[1], x[1])
-        f_feature[2] = self.f2(x[2], x_ir[2])+ self.f2(x_ir[2], x[2])
+        f_feature[0] = self.f0(x[0], x_ir[0])
+        f_feature[1] = self.f1(x[1], x_ir[1])
+        f_feature[2] = self.f2(x[2], x_ir[2])
         f_feature[3] = self.f3(torch.cat([x[3],x_ir[3]],dim=1))
-        # ---------------- SegFormer-b1——b3 ----------------
+        # ---------------- 训练和测试的modify_1（二选一） ----------------
+
+        # ---------------- 训练和测试的modify_2（二选一） ----------------
+        # f_feature = x
+        # f_feature[0] = self.f0(x[0], x_ir[0]) + self.f0(x_ir[0], x[0])
+        # f_feature[1] = self.f1(x[1], x_ir[1])+ self.f1(x_ir[1], x[1])
+        # f_feature[2] = self.f2(x[2], x_ir[2])+ self.f2(x_ir[2], x[2])
+        # f_feature[3] = self.f3(torch.cat([x[3],x_ir[3]],dim=1))
+        # ---------------- 训练和测试的modify_2（二选一） ----------------
 
         # ---------------- wo_MWFM ----------------
         # 拼接两个模态的特征图
@@ -171,20 +185,32 @@ class SegFormer(nn.Module):
 
 
 class SegFormer_s_modal(nn.Module):
-    def __init__(self, num_classes=21, phi='b0', pretrained=False):
+    def __init__(self, num_classes=21, pretrained=False):
         super(SegFormer_s_modal, self).__init__()
+
+        # load config
+        cfg, _ = load_configs()
+        backbone_phi = cfg['backbone']['phi']
+        pretrained_dir = cfg['backbone']['pretrained_dir']
+
+        backbone_weight_path = None
+        if pretrained:
+            backbone_weight_path = os.path.join(pretrained_dir, f"segformer_{backbone_phi}_backbone_weights.pth")
+        
+        ext_backbones = {
+            'b0': mit_b0, 'b1': mit_b1, 'b2': mit_b2,
+            'b3': mit_b3, 'b4': mit_b4, 'b5': mit_b5
+        }
+
         self.in_channels = {
             'b0': [32, 64, 160, 256], 'b1': [64, 128, 320, 512], 'b2': [64, 128, 320, 512],
             'b3': [64, 128, 320, 512], 'b4': [64, 128, 320, 512], 'b5': [64, 128, 320, 512],
-        }[phi]
-        self.backbone = {
-            'b0': mit_b0, 'b1': mit_b1, 'b2': mit_b2,
-            'b3': mit_b3, 'b4': mit_b4, 'b5': mit_b5,
-        }[phi](pretrained)
+        }[backbone_phi]
+        self.backbone = ext_backbones[backbone_phi](pretrained_path=backbone_weight_path)
         self.embedding_dim = {
             'b0': 256, 'b1': 256, 'b2': 768,
             'b3': 768, 'b4': 768, 'b5': 768,
-        }[phi]
+        }[backbone_phi]
         self.decode_head = SegFormerHead(num_classes, self.in_channels, self.embedding_dim)
 
 
@@ -198,7 +224,7 @@ class SegFormer_s_modal(nn.Module):
         return seg
 
 if __name__ == '__main__':
-    model = SegFormer(num_classes=21, phi='b5').cuda()
+    model = SegFormer(num_classes=21).cuda()
     img = torch.randn(1, 1, 640, 480).cuda()
     y, img = model(img, img)
     print(y.shape, img.shape)

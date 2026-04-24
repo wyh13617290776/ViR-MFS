@@ -13,7 +13,8 @@ from torch.utils.data.distributed import DistributedSampler
 from torch.utils.data import DataLoader
 from torch import optim
 from torch.cuda.amp import autocast, GradScaler
-from torch.func import functional_call
+# from torch.nn.utils.stateless import functional_call # torch 1.x用法
+from torch.func import functional_call # torch 2.x新用法
 from tqdm import tqdm
 
 from data_pipeline.dataloader import VIFSDataset
@@ -85,7 +86,7 @@ def train():
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     # === 1. 动态构建保存路径并备份配置 ===
-    exp_name = f"{dataset_cfg['name']}_{t_params['phi']}"
+    exp_name = f"{dataset_cfg['name']}_{cfg['backbone']['phi']}"
     save_dir = os.path.join(cfg['train']['save_base_dir'], model_name, exp_name)
     
     # === 初始化 Logger (DDP限制：仅在 0号进程/主卡 上执行 I/O 操作) ===
@@ -133,11 +134,11 @@ def train():
 
     # === 3. 初始化模型与优化器 ===
     # --- 修改前 ---
-    # model = SegFormer(num_classes=t_params['num_classes'], phi=t_params['phi']).to(device)
+    # model = SegFormer(num_classes=t_params['num_classes'], pretrained=t_params['use_pretrained']).to(device)
     # --- 修改前 ---
     # --- 修改后 ---
-    # 1. 实例化模型（不需要 backbone 的默认预训练加载了）
-    model = SegFormer(num_classes=t_params['num_classes'], phi=t_params['phi'], pretrained=False).to(device)
+    # 1. 实例化模型
+    model = SegFormer(num_classes=t_params['num_classes']).to(device)
 
     # 2. 指定你的最佳权重路径
     checkpoint_path = "/root/lanyun-tmp/ViR_MFS/codes/runs_meta/SegFormer/FMB_b0/fmb_b0_meta_best_mIoU.pth"

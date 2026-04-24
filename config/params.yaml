@@ -4,9 +4,8 @@
 train:
   batch_size: 4
   num_workers: 4
-  epochs: 100
+  epochs: 200
   num_classes: 9
-  phi: "b0"                 # Segformer 版本 (b0~b5)
   resize_size: [640, 480]   # [W, H] 输入图像尺寸
 
   # 学习率设置
@@ -25,13 +24,13 @@ train:
   lambda_g: 0.1
   inner_lr: 1.0e-5          # 内循环 (Inner loop) 更新步长
   inner_every: 3            # 每隔几个 epoch 触发一次 Meta 更新
-  inner_warmup: 10          # 前 W 个 epoch 作为预热，不做内更新
+  inner_warmup: 1          # 前 W 个 epoch 作为预热，不做内更新
   
   use_amp: true             # 是否使用混合精度训练加速
+  use_pretrained: true      # 是否启用预训练
 
 test:
   batch_size: 1             # 测试时通常为 1
   num_workers: 4
   num_classes: 9
-  phi: "b3"
   resize_size: [640, 480]
