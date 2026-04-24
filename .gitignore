@@ -12,3 +12,7 @@ test_results/
 __pycache__/
 *.pyc
 .DS_Store
+
+# 虚拟环境
+metafusion_venv/
+venv/
