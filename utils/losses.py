@@ -5,25 +5,49 @@ import torch.nn.functional as F
 from utils.common import gradient
 
 class FusionLoss(nn.Module):
-    """
-    图像融合损失函数：结合梯度损失(L1)和像素损失(L1)
-    """
+    """Fusion loss combining gradient preservation and pixel intensity terms."""
+
     def __init__(self, grad_weight=50.0, pix_weight=20.0):
+        """Create a fusion loss module.
+
+        Args:
+            grad_weight: Weight for the Sobel-gradient L1 loss.
+            pix_weight: Weight for the pixel-intensity L1 loss.
+
+        Returns:
+            None.
+        """
         super(FusionLoss, self).__init__()
         self.grad_weight = grad_weight
         self.pix_weight = pix_weight
 
     def forward(self, fused, vi, ir):
-        # 梯度损失：保持融合图像与最大梯度（可见光/红外）的一致性
+        """Compute fusion loss.
+
+        Args:
+            fused: Fused image tensor with shape ``[B, 1, H, W]``.
+            vi: Visible luminance tensor with shape ``[B, 1, H, W]``.
+            ir: Infrared tensor with shape ``[B, 1, H, W]``.
+
+        Returns:
+            Tuple ``(total_loss, gradient_loss, pixel_loss)``.
+        """
+        # Preserve the strongest modality edge at each pixel.
         loss_grad = F.l1_loss(gradient(fused), torch.max(gradient(vi), gradient(ir)))
-        # 像素损失：保持融合图像与最大像素强度的一致性
+        # Preserve the strongest modality intensity at each pixel.
         loss_pix  = F.l1_loss(fused, torch.max(vi, ir))
         
         total_loss = self.grad_weight * loss_grad + self.pix_weight * loss_pix
         return total_loss, loss_grad, loss_pix
 
 def ce_loss(logits, labels):
-    """
-    标准交叉熵损失，用于语义分割任务
+    """Compute semantic segmentation cross-entropy loss.
+
+    Args:
+        logits: Prediction logits with shape ``[B, C, H, W]``.
+        labels: Ground-truth labels with shape ``[B, H, W]``.
+
+    Returns:
+        Scalar cross-entropy loss tensor.
     """
     return nn.CrossEntropyLoss()(logits, labels)

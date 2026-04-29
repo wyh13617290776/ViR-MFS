@@ -1,36 +1,59 @@
 # ==========================================
-# 模型超参数配置文件 (Train/Test)
+# Model, training, and testing parameters.
 # ==========================================
+
+wavelet:
+  kernel_size: 5
+  wt_levels: 1
+  wt_type: "db1"
+  # This keeps the original asymmetric MWFM behavior: LL bands are fused,
+  # while high-frequency reconstruction uses visible-image bands only.
+  # Supported values: visible, infrared, mean, sum.
+  high_frequency_source: "visible"
+  # Supported values: static, learnable. Learnable initializes from
+  # high_frequency_source and then learns visible/infrared injection weights.
+  high_frequency_injection: "static"
+  high_frequency_init_strength: 4.0
+  high_frequency_temperature: 1.0
+
 train:
   batch_size: 4
   num_workers: 4
   epochs: 200
   num_classes: 9
-  resize_size: [640, 480]   # [W, H] 输入图像尺寸
+  resize_size: [640, 480]   # [W, H]
 
-  # 学习率设置
-  lr_f: 5.0e-5              # 融合头学习率
-  # lr_mfe: 5.0e-5            # MFE模块学习率
-  lr_seg: 5.0e-5            # 分割头学习率
-  lr_all: 5.0e-4            # 整体快速优化学习率
+  # Learning rates.
+  lr_f: 5.0e-5
+  lr_seg: 5.0e-5
+  lr_all: 5.0e-4
 
-  # --- 微调的学习率（modify_2） ---
-  # lr_all: 1.0e-5
-  # lr_f: 1.0e-5
-  # lr_seg: 1.0e-5
-  # --- 微调的学习率（modify_2） ---
-
-  # 元学习 (Meta-learning) 核心参数
+  # Meta-learning controls.
   lambda_g: 0.1
-  inner_lr: 1.0e-5          # 内循环 (Inner loop) 更新步长
-  inner_every: 3            # 每隔几个 epoch 触发一次 Meta 更新
-  inner_warmup: 1          # 前 W 个 epoch 作为预热，不做内更新
+  inner_lr: 1.0e-5
+  inner_every: 3
+  inner_warmup: 1
+  eval_every: 1
   
-  use_amp: true             # 是否使用混合精度训练加速
-  use_pretrained: true      # 是否启用预训练
+  use_amp: true
+  use_pretrained: true
+  skip_invalid_loss: true
+  grad_clip_norm: null
+
+  # Fine-tuning and resume are now part of train.py. Set enabled=true and
+  # provide either an absolute path or a checkpoint name accepted by config.yaml.
+  # Set strict=false when resuming from checkpoints trained before newly added
+  # modules, such as HighFrequencyInjectionController.
+  resume:
+    enabled: false
+    checkpoint: ""
+    strict: true
 
 test:
-  batch_size: 1             # 测试时通常为 1
+  batch_size: 1
   num_workers: 4
   num_classes: 9
   resize_size: [640, 480]
+  # False allows old checkpoints trained before HighFrequencyInjectionController
+  # to initialize newly added high-frequency logits from the current config.
+  checkpoint_strict: false

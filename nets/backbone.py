@@ -13,10 +13,29 @@ import torch.nn as nn
 import os
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
+    """Fill a tensor with truncated-normal values without tracking gradients.
+
+    Args:
+        tensor: Tensor to initialize in place.
+        mean: Mean of the source normal distribution.
+        std: Standard deviation of the source normal distribution.
+        a: Lower truncation bound.
+        b: Upper truncation bound.
+
+    Returns:
+        The input tensor after in-place initialization.
+    """
     # Cut & paste from PyTorch official master until it's in a few official releases - RW
     # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
     def norm_cdf(x):
-        # Computes standard normal cumulative distribution function
+        """Compute the standard normal cumulative distribution function.
+
+        Args:
+            x: Scalar input value.
+
+        Returns:
+            Cumulative probability for the standard normal distribution.
+        """
         return (1. + math.erf(x / math.sqrt(2.))) / 2.
 
     if (mean < a - 2 * std) or (mean > b + 2 * std):
@@ -62,25 +81,54 @@ def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
         std: the standard deviation of the normal distribution
         a: the minimum cutoff value
         b: the maximum cutoff value
+    Returns:
+        The input tensor after in-place truncated-normal initialization.
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.trunc_normal_(w)
     """
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
 
-#--------------------------------------#
-#   Gelu激活函数的实现
-#   利用近似的数学公式
-#--------------------------------------#
 class GELU(nn.Module):
+    """Gaussian Error Linear Unit using the tanh approximation."""
+
     def __init__(self):
+        """Create a GELU activation module.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
         super(GELU, self).__init__()
 
     def forward(self, x):
+        """Apply GELU activation.
+
+        Args:
+            x: Input tensor.
+
+        Returns:
+            Activated tensor with the same shape as ``x``.
+        """
         return 0.5 * x * (1 + torch.tanh(np.sqrt(2 / np.pi) * (x + 0.044715 * torch.pow(x,3))))
 
 class OverlapPatchEmbed(nn.Module):
+    """Overlapping patch embedding layer used by MiT/SegFormer."""
+
     def __init__(self, patch_size=7, stride=4, in_chans=3, embed_dim=768):
+        """Create an overlapping patch embedding module.
+
+        Args:
+            patch_size: Spatial convolution kernel size.
+            stride: Spatial convolution stride.
+            in_chans: Number of input image channels.
+            embed_dim: Number of output embedding channels.
+
+        Returns:
+            None.
+        """
         super().__init__()
         patch_size  = (patch_size, patch_size)
         self.proj   = nn.Conv2d(in_chans, embed_dim, kernel_size=patch_size, stride=stride,
@@ -90,6 +138,14 @@ class OverlapPatchEmbed(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
+        """Initialize module weights.
+
+        Args:
+            m: Module instance visited by ``Module.apply``.
+
+        Returns:
+            None.
+        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -105,6 +161,15 @@ class OverlapPatchEmbed(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x):
+        """Convert an image feature map into patch tokens.
+
+        Args:
+            x: Input tensor with shape ``[B, C, H, W]``.
+
+        Returns:
+            Tuple ``(tokens, H_out, W_out)`` where tokens have shape
+            ``[B, H_out*W_out, embed_dim]``.
+        """
         x = self.proj(x)
         _, _, H, W = x.shape
         x = x.flatten(2).transpose(1, 2)
@@ -112,19 +177,24 @@ class OverlapPatchEmbed(nn.Module):
 
         return x, H, W
 
-#--------------------------------------------------------------------------------------------------------------------#
-#   Attention机制
-#   将输入的特征qkv特征进行划分，首先生成query, key, value。query是查询向量、key是键向量、v是值向量。
-#   然后利用 查询向量query 叉乘 转置后的键向量key，这一步可以通俗的理解为，利用查询向量去查询序列的特征，获得序列每个部分的重要程度score。
-#   然后利用 score 叉乘 value，这一步可以通俗的理解为，将序列每个部分的重要程度重新施加到序列的值上去。
-#   
-#   在segformer中，为了减少计算量，首先对特征图进行了浓缩，所有特征层都压缩到原图的1/32。
-#   当输入图片为512, 512时，Block1的特征图为128, 128，此时就先将特征层压缩为16, 16。
-#   在Block1的Attention模块中，相当于将8x8个特征点进行特征浓缩，浓缩为一个特征点。
-#   然后利用128x128个查询向量对16x16个键向量与值向量进行查询。尽管键向量与值向量的数量较少，但因为查询向量的不同，依然可以获得不同的输出。
-#--------------------------------------------------------------------------------------------------------------------#
 class Attention(nn.Module):
+    """Spatial-reduction multi-head self-attention used by MiT."""
+
     def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., sr_ratio=1):
+        """Create a spatial-reduction attention module.
+
+        Args:
+            dim: Token embedding dimension.
+            num_heads: Number of attention heads.
+            qkv_bias: Whether query/key/value projections use bias.
+            qk_scale: Optional custom query-key scale.
+            attn_drop: Dropout probability for attention weights.
+            proj_drop: Dropout probability after the output projection.
+            sr_ratio: Spatial-reduction ratio for key/value tokens.
+
+        Returns:
+            None.
+        """
         super().__init__()
         assert dim % num_heads == 0, f"dim {dim} should be divided by num_heads {num_heads}."
 
@@ -149,6 +219,14 @@ class Attention(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
+        """Initialize module weights.
+
+        Args:
+            m: Module instance visited by ``Module.apply``.
+
+        Returns:
+            None.
+        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -164,43 +242,53 @@ class Attention(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
+        """Apply spatial-reduction self-attention.
+
+        Args:
+            x: Token tensor with shape ``[B, N, C]``.
+            H: Token grid height before flattening.
+            W: Token grid width before flattening.
+
+        Returns:
+            Attention output tensor with shape ``[B, N, C]``.
+        """
         B, N, C = x.shape
-        # bs, 16384, 32 => bs, 16384, 32 => bs, 16384, 8, 4 => bs, 8, 16384, 4
+        # Project tokens to queries and split channels into attention heads.
         q = self.q(x).reshape(B, N, self.num_heads, C // self.num_heads).permute(0, 2, 1, 3)
 
         if self.sr_ratio > 1:
-            # bs, 16384, 32 => bs, 32, 128, 128
+            # Restore token layout, reduce the spatial grid, and re-flatten.
             x_ = x.permute(0, 2, 1).reshape(B, C, H, W)
-            # bs, 32, 128, 128 => bs, 32, 16, 16 => bs, 256, 32
             x_ = self.sr(x_).reshape(B, C, -1).permute(0, 2, 1)
             x_ = self.norm(x_)
-            # bs, 256, 32 => bs, 256, 64 => bs, 256, 2, 8, 4 => 2, bs, 8, 256, 4
             kv = self.kv(x_).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         else:
             kv = self.kv(x).reshape(B, -1, 2, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         k, v = kv[0], kv[1]
 
-        # bs, 8, 16384, 4 @ bs, 8, 4, 256 => bs, 8, 16384, 256 
+        # Query-key similarity produces attention weights over reduced tokens.
         attn = (q @ k.transpose(-2, -1)) * self.scale
         attn = attn.softmax(dim=-1)
         attn = self.attn_drop(attn)
 
-        # bs, 8, 16384, 256  @ bs, 8, 256, 4 => bs, 8, 16384, 4 => bs, 16384, 32
+        # Weighted values are merged back from heads to the original channel dimension.
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        # bs, 16384, 32 => bs, 16384, 32
         x = self.proj(x)
         x = self.proj_drop(x)
 
         return x
 
 def drop_path(x, drop_prob: float = 0., training: bool = False, scale_by_keep: bool = True):
-    """
-    Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
-    This is the same as the DropConnect impl I created for EfficientNet, etc networks, however,
-    the original name is misleading as 'Drop Connect' is a different form of dropout in a separate paper...
-    See discussion: https://github.com/tensorflow/tpu/issues/494#issuecomment-532968956 ... I've opted for
-    changing the layer and argument names to 'drop path' rather than mix DropConnect as a layer name and use
-    'survival rate' as the argument.
+    """Apply per-sample stochastic depth.
+
+    Args:
+        x: Input tensor.
+        drop_prob: Probability of dropping the residual path.
+        training: Whether stochastic depth is active.
+        scale_by_keep: Whether to divide kept paths by keep probability.
+
+    Returns:
+        Tensor after stochastic-depth masking.
     """
     if drop_prob == 0. or not training:
         return x
@@ -212,20 +300,59 @@ def drop_path(x, drop_prob: float = 0., training: bool = False, scale_by_keep: b
     return x * random_tensor
 
 class DropPath(nn.Module):
+    """Module wrapper for stochastic depth."""
+
     def __init__(self, drop_prob=None, scale_by_keep=True):
+        """Create a DropPath module.
+
+        Args:
+            drop_prob: Probability of dropping the residual path.
+            scale_by_keep: Whether to divide kept paths by keep probability.
+
+        Returns:
+            None.
+        """
         super(DropPath, self).__init__()
         self.drop_prob = drop_prob
         self.scale_by_keep = scale_by_keep
 
     def forward(self, x):
+        """Apply stochastic depth to an input tensor.
+
+        Args:
+            x: Input tensor.
+
+        Returns:
+            Tensor after stochastic-depth masking.
+        """
         return drop_path(x, self.drop_prob, self.training, self.scale_by_keep)
     
 class DWConv(nn.Module):
+    """Depth-wise convolution over token grids."""
+
     def __init__(self, dim=768):
+        """Create a depth-wise convolution module.
+
+        Args:
+            dim: Number of token channels.
+
+        Returns:
+            None.
+        """
         super(DWConv, self).__init__()
         self.dwconv = nn.Conv2d(dim, dim, 3, 1, 1, bias=True, groups=dim)
 
     def forward(self, x, H, W):
+        """Apply depth-wise convolution to flattened tokens.
+
+        Args:
+            x: Token tensor with shape ``[B, N, C]``.
+            H: Token grid height.
+            W: Token grid width.
+
+        Returns:
+            Token tensor with shape ``[B, N, C]``.
+        """
         B, N, C = x.shape
         x = x.transpose(1, 2).view(B, C, H, W)
         x = self.dwconv(x)
@@ -234,7 +361,23 @@ class DWConv(nn.Module):
         return x
     
 class Mlp(nn.Module):
+    """Transformer feed-forward network with depth-wise convolution."""
+
     def __init__(self, in_features, hidden_features=None, out_features=None, act_layer=GELU, drop=0.):
+        """Create a Mix-FFN block.
+
+        Args:
+            in_features: Number of input token channels.
+            hidden_features: Number of hidden token channels. Defaults to
+                ``in_features`` when omitted.
+            out_features: Number of output token channels. Defaults to
+                ``in_features`` when omitted.
+            act_layer: Activation module class.
+            drop: Dropout probability.
+
+        Returns:
+            None.
+        """
         super().__init__()
         out_features    = out_features or in_features
         hidden_features = hidden_features or in_features
@@ -250,6 +393,14 @@ class Mlp(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
+        """Initialize module weights.
+
+        Args:
+            m: Module instance visited by ``Module.apply``.
+
+        Returns:
+            None.
+        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -265,6 +416,16 @@ class Mlp(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
+        """Apply the Mix-FFN block.
+
+        Args:
+            x: Token tensor with shape ``[B, N, C]``.
+            H: Token grid height.
+            W: Token grid width.
+
+        Returns:
+            Token tensor with shape ``[B, N, C]``.
+        """
         x = self.fc1(x)
         x = self.dwconv(x, H, W)
         x = self.act(x)
@@ -274,8 +435,28 @@ class Mlp(nn.Module):
         return x
 
 class Block(nn.Module):
+    """MiT transformer block with attention, Mix-FFN, and residual paths."""
+
     def __init__(self, dim, num_heads, mlp_ratio=4., qkv_bias=False, qk_scale=None, drop=0., attn_drop=0.,
                  drop_path=0., act_layer=GELU, norm_layer=nn.LayerNorm, sr_ratio=1):
+        """Create one MiT transformer block.
+
+        Args:
+            dim: Token embedding dimension.
+            num_heads: Number of attention heads.
+            mlp_ratio: Expansion ratio for the feed-forward hidden dimension.
+            qkv_bias: Whether query/key/value projections use bias.
+            qk_scale: Optional custom query-key scale.
+            drop: Dropout probability for projections and feed-forward layers.
+            attn_drop: Dropout probability for attention weights.
+            drop_path: Stochastic-depth probability.
+            act_layer: Activation module class.
+            norm_layer: Normalization module class.
+            sr_ratio: Spatial-reduction ratio for attention.
+
+        Returns:
+            None.
+        """
         super().__init__()
         self.norm1      = norm_layer(dim)
         
@@ -291,6 +472,14 @@ class Block(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
+        """Initialize module weights.
+
+        Args:
+            m: Module instance visited by ``Module.apply``.
+
+        Returns:
+            None.
+        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -306,36 +495,56 @@ class Block(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
+        """Apply attention and feed-forward residual updates.
+
+        Args:
+            x: Token tensor with shape ``[B, N, C]``.
+            H: Token grid height.
+            W: Token grid width.
+
+        Returns:
+            Token tensor with shape ``[B, N, C]``.
+        """
         x = x + self.drop_path(self.attn(self.norm1(x), H, W))
         x = x + self.drop_path(self.mlp(self.norm2(x), H, W))
         return x
 
 class MixVisionTransformer(nn.Module):
+    """MixVisionTransformer backbone used by SegFormer."""
+
     def __init__(self, in_chans=3, num_classes=1000, embed_dims=[32, 64, 160, 256],
                  num_heads=[1, 2, 4, 8], mlp_ratios=[4, 4, 4, 4], qkv_bias=False, qk_scale=None, drop_rate=0.,
                  attn_drop_rate=0., drop_path_rate=0., norm_layer=nn.LayerNorm,
                  depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1]):
+        """Create a four-stage MixVisionTransformer.
+
+        Args:
+            in_chans: Number of input image channels.
+            num_classes: Reserved classification class count.
+            embed_dims: Embedding dimensions for the four stages.
+            num_heads: Attention head counts for the four stages.
+            mlp_ratios: Feed-forward expansion ratios for the four stages.
+            qkv_bias: Whether query/key/value projections use bias.
+            qk_scale: Optional custom query-key scale.
+            drop_rate: Dropout probability for projections and feed-forward layers.
+            attn_drop_rate: Dropout probability for attention weights.
+            drop_path_rate: Maximum stochastic-depth probability.
+            norm_layer: Normalization module class.
+            depths: Number of transformer blocks per stage.
+            sr_ratios: Spatial-reduction ratios per stage.
+
+        Returns:
+            None.
+        """
         super().__init__()
         self.num_classes    = num_classes
         self.depths         = depths
 
-        #----------------------------------#
-        #   Transformer模块，共有四个部分
-        #----------------------------------#
+        # Create a linearly increasing stochastic-depth rate across all blocks.
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, sum(depths))]
         
-        #----------------------------------#
-        #   block1
-        #----------------------------------#
-        #-----------------------------------------------#
-        #   对输入图像进行分区，并下采样
-        #   512, 512, 3 => 128, 128, 32 => 16384, 32
-        #-----------------------------------------------#
+        # Stage 1: overlap patch embedding followed by transformer blocks.
         self.patch_embed1 = OverlapPatchEmbed(patch_size=7, stride=4, in_chans=in_chans, embed_dim=embed_dims[0])
-        #-----------------------------------------------#
-        #   利用transformer模块进行特征提取
-        #   16384, 32 => 16384, 32
-        #-----------------------------------------------#
         cur = 0
         self.block1 = nn.ModuleList(
             [
@@ -348,18 +557,8 @@ class MixVisionTransformer(nn.Module):
         )
         self.norm1 = norm_layer(embed_dims[0])
         
-        #----------------------------------#
-        #   block2
-        #----------------------------------#
-        #-----------------------------------------------#
-        #   对输入图像进行分区，并下采样
-        #   128, 128, 32 => 64, 64, 64 => 4096, 64
-        #-----------------------------------------------#
+        # Stage 2: downsample stage-1 features and refine tokens.
         self.patch_embed2 = OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[0], embed_dim=embed_dims[1])
-        #-----------------------------------------------#
-        #   利用transformer模块进行特征提取
-        #   4096, 64 => 4096, 64
-        #-----------------------------------------------#
         cur += depths[0]
         self.block2 = nn.ModuleList(
             [
@@ -372,18 +571,8 @@ class MixVisionTransformer(nn.Module):
         )
         self.norm2 = norm_layer(embed_dims[1])
 
-        #----------------------------------#
-        #   block3
-        #----------------------------------#
-        #-----------------------------------------------#
-        #   对输入图像进行分区，并下采样
-        #   64, 64, 64 => 32, 32, 160 => 1024, 160
-        #-----------------------------------------------#
+        # Stage 3: downsample stage-2 features and refine tokens.
         self.patch_embed3 = OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[1], embed_dim=embed_dims[2])
-        #-----------------------------------------------#
-        #   利用transformer模块进行特征提取
-        #   1024, 160 => 1024, 160
-        #-----------------------------------------------#
         cur += depths[1]
         self.block3 = nn.ModuleList(
             [
@@ -396,18 +585,8 @@ class MixVisionTransformer(nn.Module):
         )
         self.norm3 = norm_layer(embed_dims[2])
 
-        #----------------------------------#
-        #   block4
-        #----------------------------------#
-        #-----------------------------------------------#
-        #   对输入图像进行分区，并下采样
-        #   32, 32, 160 => 16, 16, 256 => 256, 256
-        #-----------------------------------------------#
+        # Stage 4: downsample stage-3 features and produce semantic features.
         self.patch_embed4 = OverlapPatchEmbed(patch_size=3, stride=2, in_chans=embed_dims[2], embed_dim=embed_dims[3])
-        #-----------------------------------------------#
-        #   利用transformer模块进行特征提取
-        #   256, 256 => 256, 256
-        #-----------------------------------------------#
         cur += depths[2]
         self.block4 = nn.ModuleList(
             [
@@ -423,6 +602,14 @@ class MixVisionTransformer(nn.Module):
         self.apply(self._init_weights)
 
     def _init_weights(self, m):
+        """Initialize module weights.
+
+        Args:
+            m: Module instance visited by ``Module.apply``.
+
+        Returns:
+            None.
+        """
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
             if isinstance(m, nn.Linear) and m.bias is not None:
@@ -438,12 +625,18 @@ class MixVisionTransformer(nn.Module):
                 m.bias.data.zero_()
                 
     def forward(self, x):
+        """Extract four multi-scale feature maps.
+
+        Args:
+            x: Input image tensor with shape ``[B, C, H, W]``.
+
+        Returns:
+            List of four feature maps from shallow to deep stages.
+        """
         B = x.shape[0]
         outs = []
 
-        #----------------------------------#
-        #   block1
-        #----------------------------------#
+        # Stage 1 returns the highest-resolution feature map.
         x, H, W = self.patch_embed1.forward(x)
         for i, blk in enumerate(self.block1):
             x = blk.forward(x, H, W)
@@ -451,9 +644,7 @@ class MixVisionTransformer(nn.Module):
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         outs.append(x)
 
-        #----------------------------------#
-        #   block2
-        #----------------------------------#
+        # Stage 2 halves the spatial resolution.
         x, H, W = self.patch_embed2.forward(x)
         for i, blk in enumerate(self.block2):
             x = blk.forward(x, H, W)
@@ -461,9 +652,7 @@ class MixVisionTransformer(nn.Module):
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         outs.append(x)
 
-        #----------------------------------#
-        #   block3
-        #----------------------------------#
+        # Stage 3 provides mid-level semantic features.
         x, H, W = self.patch_embed3.forward(x)
         for i, blk in enumerate(self.block3):
             x = blk.forward(x, H, W)
@@ -471,9 +660,7 @@ class MixVisionTransformer(nn.Module):
         x = x.reshape(B, H, W, -1).permute(0, 3, 1, 2).contiguous()
         outs.append(x)
 
-        #----------------------------------#
-        #   block4
-        #----------------------------------#
+        # Stage 4 provides the deepest semantic feature map.
         x, H, W = self.patch_embed4.forward(x)
         for i, blk in enumerate(self.block4):
             x = blk.forward(x, H, W)
@@ -484,7 +671,17 @@ class MixVisionTransformer(nn.Module):
         return outs
 
 class mit_b0(MixVisionTransformer):
+    """MiT-B0 backbone variant."""
+
     def __init__(self, pretrained_path=None):
+        """Create a MiT-B0 backbone.
+
+        Args:
+            pretrained_path: Optional checkpoint path for backbone weights.
+
+        Returns:
+            None.
+        """
         super(mit_b0, self).__init__(
             embed_dims=[32, 64, 160, 256], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
             qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[2, 2, 2, 2], sr_ratios=[8, 4, 2, 1],
@@ -494,7 +691,17 @@ class mit_b0(MixVisionTransformer):
             self.load_state_dict(torch.load(pretrained_path), strict=False)
 
 class mit_b1(MixVisionTransformer):
+    """MiT-B1 backbone variant."""
+
     def __init__(self, pretrained_path=None):
+        """Create a MiT-B1 backbone.
+
+        Args:
+            pretrained_path: Optional checkpoint path for backbone weights.
+
+        Returns:
+            None.
+        """
         super(mit_b1, self).__init__(
             embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
             qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[2, 2, 2, 2], sr_ratios=[8, 4, 2, 1],
@@ -504,7 +711,17 @@ class mit_b1(MixVisionTransformer):
             self.load_state_dict(torch.load(pretrained_path), strict=False)
 
 class mit_b2(MixVisionTransformer):
+    """MiT-B2 backbone variant."""
+
     def __init__(self, pretrained_path=None):
+        """Create a MiT-B2 backbone.
+
+        Args:
+            pretrained_path: Optional checkpoint path for backbone weights.
+
+        Returns:
+            None.
+        """
         super(mit_b2, self).__init__(
             embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
             qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 4, 6, 3], sr_ratios=[8, 4, 2, 1],
@@ -514,7 +731,17 @@ class mit_b2(MixVisionTransformer):
             self.load_state_dict(torch.load(pretrained_path), strict=False)
 
 class mit_b3(MixVisionTransformer):
+    """MiT-B3 backbone variant."""
+
     def __init__(self, pretrained_path=None):
+        """Create a MiT-B3 backbone.
+
+        Args:
+            pretrained_path: Optional checkpoint path for backbone weights.
+
+        Returns:
+            None.
+        """
         super(mit_b3, self).__init__(
             embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
             qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 4, 18, 3], sr_ratios=[8, 4, 2, 1],
@@ -524,7 +751,17 @@ class mit_b3(MixVisionTransformer):
             self.load_state_dict(torch.load(pretrained_path), strict=False)
 
 class mit_b4(MixVisionTransformer):
+    """MiT-B4 backbone variant."""
+
     def __init__(self, pretrained_path=None):
+        """Create a MiT-B4 backbone.
+
+        Args:
+            pretrained_path: Optional checkpoint path for backbone weights.
+
+        Returns:
+            None.
+        """
         super(mit_b4, self).__init__(
             embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
             qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 8, 27, 3], sr_ratios=[8, 4, 2, 1],
@@ -534,7 +771,17 @@ class mit_b4(MixVisionTransformer):
             self.load_state_dict(torch.load(pretrained_path), strict=False)
 
 class mit_b5(MixVisionTransformer):
+    """MiT-B5 backbone variant."""
+
     def __init__(self, pretrained_path=None):
+        """Create a MiT-B5 backbone.
+
+        Args:
+            pretrained_path: Optional checkpoint path for backbone weights.
+
+        Returns:
+            None.
+        """
         super(mit_b5, self).__init__(
             embed_dims=[64, 128, 320, 512], num_heads=[1, 2, 5, 8], mlp_ratios=[4, 4, 4, 4],
             qkv_bias=True, norm_layer=partial(nn.LayerNorm, eps=1e-6), depths=[3, 6, 40, 3], sr_ratios=[8, 4, 2, 1],

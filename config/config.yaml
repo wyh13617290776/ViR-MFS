@@ -1,23 +1,22 @@
 # ==========================================
-# 工程核心路径配置文件
+# Project path and runtime configuration.
 # ==========================================
-model_name: "SegFormer"                                     # 算法/模型架构名称 (用于目录分级)
+model_name: "SegFormer"
 
-# ========== 骨干网络配置 ==========
 backbone:
-  phi: "b0"                                                 # backbone 版本: b0, b1, b2, b3
-  pretrained_dir: "model_data"                              # 预训练权重的存放目录
+  phi: "b0"                                                 # Backbone variant: b0, b1, b2, b3, b4, b5.
+  pretrained_dir: "model_data"                              # Directory for pretrained SegFormer backbone weights.
 
 dataset:
-  name: "MSRS"                                              # 当前使用的数据集名称
-  root_dir: "/home/wyh/Projects/workspace/ViR_MFS/datasets" # 数据集根目录
+  name: "MSRS"
+  root_dir: "../datasets"
 
 train:
-  save_base_dir: "runs_meta"                                # 结果根目录
+  save_base_dir: "runs"
   
 test:
-  save_base_dir: "test_results"                             # 测试结果根目录
-  # 【智能寻址】
-  # 方式1 (快捷): 只写 "best_mIoU" 或 "meta_latest"，代码会自动拼接
-  # 方式2 (自定义): 直接写完整名称如 "my_custom_weights.pth"
+  save_base_dir: "test_results"
+  # Short names such as "best_mIoU" and "meta_latest" are expanded to
+  # "{dataset}_{phi}_{name}.pth" inside the training output directory.
+  # Absolute paths and explicit "*.pth" file names are also supported.
   checkpoint_name: "msrs_b0_meta_modify_1.pth"

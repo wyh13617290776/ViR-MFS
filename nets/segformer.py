@@ -10,40 +10,95 @@ import torch.nn.functional as F
 from .backbone import mit_b0, mit_b1, mit_b2, mit_b3, mit_b4, mit_b5
 from .wtconv2d import WTConv2d_VIF
 
-import os
-from config_loader import load_configs
-
 class MLP(nn.Module):
-    """
-    Linear Embedding
-    """
+    """Linear projection used by the SegFormer decoder."""
+
     def __init__(self, input_dim=2048, embed_dim=768):
+        """Create a feature projection layer.
+
+        Args:
+            input_dim: Number of input feature channels.
+            embed_dim: Number of output embedding channels.
+
+        Returns:
+            None.
+        """
         super().__init__()
         self.proj = nn.Linear(input_dim, embed_dim)
 
     def forward(self, x):
+        """Project a 2D feature map into token embeddings.
+
+        Args:
+            x: Feature tensor with shape ``[B, C, H, W]``.
+
+        Returns:
+            Tensor with shape ``[B, H*W, embed_dim]``.
+        """
         x = x.flatten(2).transpose(1, 2)
         x = self.proj(x)
         return x
     
 class ConvModule(nn.Module):
+    """Convolution, batch normalization, and activation block."""
+
     def __init__(self, c1, c2, k=1, s=1, p=0, g=1, act=True):
+        """Create a convolution block.
+
+        Args:
+            c1: Number of input channels.
+            c2: Number of output channels.
+            k: Kernel size.
+            s: Stride.
+            p: Padding.
+            g: Number of convolution groups.
+            act: Activation flag or activation module.
+
+        Returns:
+            None.
+        """
         super(ConvModule, self).__init__()
         self.conv   = nn.Conv2d(c1, c2, k, s, p, groups=g, bias=False)
         self.bn     = nn.BatchNorm2d(c2, eps=0.001, momentum=0.03)
         self.act    = nn.ReLU() if act is True else (act if isinstance(act, nn.Module) else nn.Identity())
 
     def forward(self, x):
+        """Apply convolution, normalization, and activation.
+
+        Args:
+            x: Input feature tensor.
+
+        Returns:
+            Processed feature tensor.
+        """
         return self.act(self.bn(self.conv(x)))
 
     def fuseforward(self, x):
+        """Apply convolution and activation without batch normalization.
+
+        Args:
+            x: Input feature tensor.
+
+        Returns:
+            Processed feature tensor.
+        """
         return self.act(self.conv(x))
 
 class SegFormerHead(nn.Module):
-    """
-    SegFormer: Simple and Efficient Design for Semantic Segmentation with Transformers
-    """
+    """SegFormer decoder head for dense prediction."""
+
     def __init__(self, num_classes=20, in_channels=[32, 64, 160, 256], embedding_dim=768, dropout_ratio=0.1):
+        """Create a multi-scale SegFormer head.
+
+        Args:
+            num_classes: Number of output channels/classes.
+            in_channels: Channel dimensions of the four backbone stages.
+            embedding_dim: Shared embedding dimension for decoder fusion.
+            dropout_ratio: Dropout probability before prediction.
+
+        Returns:
+            None.
+        """
         super(SegFormerHead, self).__init__()
         c1_in_channels, c2_in_channels, c3_in_channels, c4_in_channels = in_channels
 
@@ -62,6 +117,14 @@ class SegFormerHead(nn.Module):
         self.dropout        = nn.Dropout2d(dropout_ratio)
     
     def forward(self, inputs):
+        """Decode multi-scale backbone features.
+
+        Args:
+            inputs: List of four feature tensors from low to high semantic level.
+
+        Returns:
+            Dense logits tensor at the first feature scale.
+        """
         c1, c2, c3, c4 = inputs
 
         ############## MLP decoder on C1-C4 ###########
@@ -87,17 +150,35 @@ class SegFormerHead(nn.Module):
         return x
 
 class SegFormer(nn.Module):
-    def __init__(self, num_classes: int, pretrained = False):
-        super(SegFormer, self).__init__()
+    """Visible-infrared fusion and semantic segmentation network."""
 
-        # load config
-        cfg, _ = load_configs()
-        backbone_phi = cfg['backbone']['phi']
-        pretrained_dir = cfg['backbone']['pretrained_dir']
+    def __init__(
+        self,
+        num_classes: int,
+        pretrained=False,
+        backbone_phi="b0",
+        pretrained_dir="model_data",
+        wavelet_config=None,
+    ):
+        """Create the ViR-MFS SegFormer model.
+
+        Args:
+            num_classes: Number of semantic segmentation classes.
+            pretrained: Whether to load a pretrained SegFormer backbone.
+            backbone_phi: SegFormer backbone variant.
+            pretrained_dir: Directory containing pretrained backbone weights.
+            wavelet_config: Optional MWFM configuration dictionary. Supported
+                keys include ``kernel_size``, ``wt_levels``, ``wt_type``, and
+                high-frequency injection controls.
+
+        Returns:
+            None.
+        """
+        super(SegFormer, self).__init__()
 
         backbone_weight_path = None
         if pretrained:
-            backbone_weight_path = os.path.join(pretrained_dir, f"segformer_{backbone_phi}_backbone_weights.pth")
+            backbone_weight_path = f"{pretrained_dir}/segformer_{backbone_phi}_backbone_weights.pth"
         
         ext_backbones = {
             'b0': mit_b0, 'b1': mit_b1, 'b2': mit_b2,
@@ -116,13 +197,14 @@ class SegFormer(nn.Module):
         self.decode_head = SegFormerHead(num_classes, self.in_channels, self.embedding_dim)
         self.fusion_head = SegFormerHead(2, self.in_channels, self.embedding_dim)
 
-        self.f0 = WTConv2d_VIF(in_channels=self.in_channels[0], out_channels=self.in_channels[0])
-        self.f1 = WTConv2d_VIF(in_channels=self.in_channels[1], out_channels=self.in_channels[1])
-        self.f2 = WTConv2d_VIF(in_channels=self.in_channels[2], out_channels=self.in_channels[2])
+        wavelet_config = wavelet_config or {}
+        self.f0 = WTConv2d_VIF(in_channels=self.in_channels[0], out_channels=self.in_channels[0], **wavelet_config)
+        self.f1 = WTConv2d_VIF(in_channels=self.in_channels[1], out_channels=self.in_channels[1], **wavelet_config)
+        self.f2 = WTConv2d_VIF(in_channels=self.in_channels[2], out_channels=self.in_channels[2], **wavelet_config)
         self.f3 = nn.Conv2d(in_channels=self.in_channels[3]*2, out_channels=self.in_channels[3], kernel_size=1, stride=1, padding=0)
         
         # ---------------- wo_MWFM ----------------
-        # 使用卷积来替代原有的小波卷积模块
+        # Convolutional fallback used by ablation experiments.
         # self.f0 = nn.Conv2d(in_channels=self.in_channels[0] * 2, out_channels=self.in_channels[0], kernel_size=3, padding=1)
         # self.f1 = nn.Conv2d(in_channels=self.in_channels[1] * 2, out_channels=self.in_channels[1], kernel_size=3, padding=1)
         # self.f2 = nn.Conv2d(in_channels=self.in_channels[2] * 2, out_channels=self.in_channels[2], kernel_size=3, padding=1)
@@ -130,35 +212,44 @@ class SegFormer(nn.Module):
         # ---------------- wo_MWFM ----------------
 
     def forward(self, inputs, inputs_ir,return_lists=False):
+        """Run fusion and segmentation forward pass.
+
+        Args:
+            inputs: Visible luminance tensor with shape ``[B, 1, H, W]``.
+            inputs_ir: Infrared tensor with shape ``[B, 1, H, W]``.
+            return_lists: Whether to return compatibility placeholders used by
+                older meta-learning code.
+
+        Returns:
+            ``(fused_image, segmentation_logits)`` by default. If
+            ``return_lists`` is true, returns
+            ``(fused_image, segmentation_logits, fused_image, segmentation_logits)``.
+        """
         H, W = inputs.size(2), inputs.size(3)
         
         x = self.backbone.forward(torch.cat([inputs]*3, dim=1))
         x_ir = self.backbone.forward(torch.cat([inputs_ir]*3, dim=1))
-        '''
-        这里的输出特征形状，分别为：
-        torch.Size([4, 64, 160, 120])
-        torch.Size([4, 128, 80, 60])
-        torch.Size([4, 320, 40, 30])
-        torch.Size([4, 512, 20, 15])
-        '''
-        # ---------------- 训练和测试的modify_1（二选一） ----------------
-        f_feature = x
+        # Default asymmetric MWFM path used for training and testing.
+        # ---------------- modify_1 ----------------
+        f_feature = list(x)
         f_feature[0] = self.f0(x[0], x_ir[0])
         f_feature[1] = self.f1(x[1], x_ir[1])
         f_feature[2] = self.f2(x[2], x_ir[2])
         f_feature[3] = self.f3(torch.cat([x[3],x_ir[3]],dim=1))
-        # ---------------- 训练和测试的modify_1（二选一） ----------------
-
-        # ---------------- 训练和测试的modify_2（二选一） ----------------
+        # ---------------- modify_1 ----------------
+        
+        # Symmetric MWFM ablation path.
+        # ---------------- modify_2 ----------------
         # f_feature = x
         # f_feature[0] = self.f0(x[0], x_ir[0]) + self.f0(x_ir[0], x[0])
         # f_feature[1] = self.f1(x[1], x_ir[1])+ self.f1(x_ir[1], x[1])
         # f_feature[2] = self.f2(x[2], x_ir[2])+ self.f2(x_ir[2], x[2])
         # f_feature[3] = self.f3(torch.cat([x[3],x_ir[3]],dim=1))
-        # ---------------- 训练和测试的modify_2（二选一） ----------------
+        # ---------------- modify_2 ----------------
 
+        # Symmetric MWFM ablation path.
         # ---------------- wo_MWFM ----------------
-        # 拼接两个模态的特征图
+        # Concatenate both modality features for convolutional ablation.
         # f_feature = [
         #     self.f0(torch.cat([x[0], x_ir[0]], dim=1)),
         #     self.f1(torch.cat([x[1], x_ir[1]], dim=1)),
@@ -179,23 +270,29 @@ class SegFormer(nn.Module):
 
 
 #------------------------------------------------------------------------------#
-'''
-这里的代码是用来进行别的方法的融合实验
-'''
+# Single-modal ablation model.
 
 
 class SegFormer_s_modal(nn.Module):
-    def __init__(self, num_classes=21, pretrained=False):
-        super(SegFormer_s_modal, self).__init__()
+    """Single-modal SegFormer segmentation model used for ablations."""
 
-        # load config
-        cfg, _ = load_configs()
-        backbone_phi = cfg['backbone']['phi']
-        pretrained_dir = cfg['backbone']['pretrained_dir']
+    def __init__(self, num_classes=21, pretrained=False, backbone_phi="b0", pretrained_dir="model_data"):
+        """Create a single-modal SegFormer.
+
+        Args:
+            num_classes: Number of semantic segmentation classes.
+            pretrained: Whether to load pretrained backbone weights.
+            backbone_phi: SegFormer backbone variant.
+            pretrained_dir: Directory containing pretrained backbone weights.
+
+        Returns:
+            None.
+        """
+        super(SegFormer_s_modal, self).__init__()
 
         backbone_weight_path = None
         if pretrained:
-            backbone_weight_path = os.path.join(pretrained_dir, f"segformer_{backbone_phi}_backbone_weights.pth")
+            backbone_weight_path = f"{pretrained_dir}/segformer_{backbone_phi}_backbone_weights.pth"
         
         ext_backbones = {
             'b0': mit_b0, 'b1': mit_b1, 'b2': mit_b2,
@@ -215,6 +312,14 @@ class SegFormer_s_modal(nn.Module):
 
 
     def forward(self, inputs):
+        """Run single-modal semantic segmentation.
+
+        Args:
+            inputs: Input luminance tensor with shape ``[B, 1, H, W]``.
+
+        Returns:
+            Segmentation logits with shape ``[B, num_classes, H, W]``.
+        """
         H, W = inputs.size(2), inputs.size(3)
 
         x = self.backbone.forward(torch.cat([inputs] * 3, dim=1))
@@ -224,7 +329,8 @@ class SegFormer_s_modal(nn.Module):
         return seg
 
 if __name__ == '__main__':
-    model = SegFormer(num_classes=21).cuda()
-    img = torch.randn(1, 1, 640, 480).cuda()
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = SegFormer(num_classes=21).to(device)
+    img = torch.randn(1, 1, 640, 480).to(device)
     y, img = model(img, img)
     print(y.shape, img.shape)

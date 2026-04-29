@@ -14,61 +14,91 @@ Infrared and visible image fusion is a pivotal task in computer vision, aiming t
 
 ---
 
+## Algorithm Core
+
+ViR-MFS is an end-to-end infrared-visible fusion and semantic segmentation framework. Its key components are:
+
+* A shared MixVisionTransformer / SegFormer backbone extracts multi-scale visible and infrared features.
+* The Multi-scale Wavelet Fusion Module (MWFM) fuses low-frequency structures and, by default, reconstructs high-frequency details from the visible branch to keep the original asymmetric infrared-visible design.
+* A fusion head predicts adaptive visible/infrared fusion weights, while a segmentation head predicts semantic masks from the fused feature pyramid.
+* Alternating meta-learning updates the fusion branch and segmentation branch to reduce multi-task gradient conflict.
+
 ## Directory Structure
 
-The project has been refactored for robust engineering and reproducibility. The core organization is as follows:
+The recommended workspace keeps datasets outside the code repository and at the same level as `ViR-MFS/`. The code root remains the execution root. Configuration, environment scripts, requirements, README, and `.gitignore` stay at the repository root.
 
 ```text
-Project_Root/
-├── datasets/                   # Datasets directory (MSRS, FMB)
+workspace/
+├── datasets/
 │   ├── FMB/
-│   │   ├── ir/ (test/, train/)
-│   │   ├── label/ (test/, train/)
-│   │   └── vi/ (test/, train/)
-│   └── MSRS/
-│       ├── ir/ (test/, train/)
-│       ├── label/ (test/, train/)
-│       └── vi/ (test/, train/)
-└── codes/                      # Main codebase
-    ├── config/                 # Configuration files (YAML)
-    │   ├── config.yaml         # Core paths and environment configurations
-    │   └── params.yaml         # Hyperparameters for training and testing
-    ├── data_pipeline/          # Data loading and processing
+│   │   ├── ir/
+│   │   │   ├── train/
+│   │   │   └── test/
+│   │   ├── label/
+│   │   │   ├── train/
+│   │   │   └── test/
+│   │   └── vi/
+│   │       ├── train/
+│   │       └── test/
+│   ├── MSRS/
+│   │   ├── ir/
+│   │   │   ├── train/
+│   │   │   └── test/
+│   │   ├── label/
+│   │   │   ├── train/
+│   │   │   └── test/
+│   │   └── vi/
+│   │       ├── train/
+│   │       └── test/
+│   └── ...
+└── ViR-MFS/
+    ├── config/
+    │   ├── config.yaml         # Dataset, backbone, output, and checkpoint paths.
+    │   └── params.yaml         # Train/test/meta-learning/wavelet parameters.
+    ├── config_loader.py        # YAML loader and ConfigInjector.
+    ├── data_pipeline/
     │   └── dataloader.py
-    ├── nets/                   # Network architectures
-    │   ├── backbone.py         
-    │   ├── segformer.py        
-    │   ├── wavelet.py          
-    │   └── wtconv2d.py         
-    ├── utils/                  # Utility functions and loss metrics
-    │   ├── common.py           
-    │   ├── losses.py           
-    │   ├── metrics.py          
-    │   ├── utils_meta.py       
-    │   └── utils_logger.py     
-    ├── config_loader.py        # YAML configuration loader
-    ├── train.py                # Main training script
-    ├── test.py                 # Main testing and evaluation script
-    ├── run_experiment.sh       # Unified execution script for training/testing
-    ├── build_ViR_MFS_env.sh    # Environment setup script
-    └── requirements.txt        # Python dependencies
+    ├── engine/
+    │   ├── training.py         # Training/fine-tuning orchestration.
+    │   └── testing.py          # Testing and output orchestration.
+    ├── nets/                   # Network definitions. Backbone topology is unchanged.
+    │   ├── backbone.py
+    │   ├── segformer.py
+    │   ├── wavelet.py
+    │   └── wtconv2d.py
+    ├── utils/
+    │   ├── checkpoint.py
+    │   ├── common.py
+    │   ├── evaluation.py
+    │   ├── experiment.py
+    │   ├── losses.py
+    │   ├── metrics.py
+    │   ├── runtime.py
+    │   ├── utils_logger.py
+    │   └── utils_meta.py
+    ├── train.py                # Thin training entrypoint.
+    ├── test.py                 # Thin testing entrypoint.
+    ├── run_experiment.sh
+    ├── build_ViR_MFS_env.sh
+    ├── requirements.txt
+    ├── .gitignore
+    └── README.md
 ```
 
 **Note:** The following directories are generated during runtime and are ignored by version control:
 * `model_data/`: Directory for pre-trained backbone weights.
-* `runs/` & `runs_meta/`: Checkpoints and training logs.
+* `runs/`: Checkpoints, training logs, and timestamped traceability history.
 * `test_results/`: Output directories for fused images and segmentation masks.
 
 ---
 
 ## Environment Setup
 
-Please ensure you have Python 3.8+ and PyTorch 2.x (e.g., PyTorch 2.2.2+cu118 or PyTorch 2.3.0+cu118) installed matching your CUDA environment. 
+Please ensure you have Python 3.8+ and PyTorch 2.x (e.g., PyTorch 2.2.2+cu118 or PyTorch 2.3.0+cu118) installed matching your CUDA environment.
 
-Run the provided shell script to build the environment and install dependencies:
+Run the provided shell script from the repository root to build the environment and install dependencies:
 
 ```bash
-cd codes
 bash build_ViR_MFS_env.sh
 # Alternatively, install manually: pip install -r requirements.txt
 ```
@@ -85,36 +115,58 @@ We evaluate our method on the **MSRS** and **FMB** datasets.
    
    *(Note: The original copyrights of the datasets belong to their respective authors. We provide these links solely to facilitate reproducibility.)*
 
-2. Organize the downloaded datasets strictly matching the `datasets/` structure shown in the Directory Structure section above.
+2. Organize the downloaded datasets strictly matching the `workspace/datasets/` structure shown in the Directory Structure section above.
+3. Set `config/config.yaml -> dataset.root_dir` to the absolute or relative path of the `datasets/` directory. For the recommended sibling layout, this is typically `../datasets` when running from `ViR-MFS/`.
 
 ---
 
 ## Quick Start
 
-We have eliminated hardcoded paths. All parameters and dataset paths are now centrally managed via YAML configuration files.
+Hardcoded training/testing paths have been removed from the active entrypoints. Runtime dependencies are resolved through `ConfigInjector` from YAML configuration files.
 
 ### 1. Configuration
-Navigate to the `codes/config/` directory:
-* **`config.yaml`**: Ensure the absolute or relative paths point correctly to your `datasets/` folder and `model_data/`.
-* **`params.yaml`**: Configure training hyperparameters such as `batch_size`, `epochs`, `learning_rates`, and AMP settings (`use_amp`).
+* **`config.yaml`**: Ensure `dataset.root_dir` points to your `datasets/` folder and `backbone.pretrained_dir` points to `model_data/` or another pretrained-weight directory.
+* **`params.yaml`**: Configure training hyperparameters, testing parameters, meta-learning controls, resume/fine-tuning settings, and MWFM wavelet parameters.
+* **MWFM high-frequency control**: `params.yaml -> wavelet.high_frequency_source` defaults to `visible`, preserving the asymmetric design. Supported values are `visible`, `infrared`, `mean`, and `sum`.
+* **Learnable high-frequency injection**: `params.yaml -> wavelet.high_frequency_injection` can be `learnable` or `static`. The learnable mode initializes from `high_frequency_source` and then optimizes visible/infrared high-frequency injection weights during training.
+* **Checkpoint compatibility**: old checkpoints trained before `HighFrequencyInjectionController` do not contain `f0/f1/f2.high_frequency_controller.logits`. Set `test.checkpoint_strict: false` for evaluation or `train.resume.strict: false` for fine-tuning old checkpoints. The new high-frequency controller is still created; missing logits are initialized from the current wavelet config instead of being loaded from the checkpoint.
+* **Traceability**: each training or testing run writes a timestamped `history/<run_id>/` folder under its output directory, including configs, resolved configs, manifest, git status, git diff, requirements, and pip freeze.
 
 ### 2. Training
 Use the unified shell script to start training. The script automatically handles environment variables and memory optimization:
 
 ```bash
-cd codes
 # Usage: bash run_experiment.sh [GPU_ID] [MODE]
 bash run_experiment.sh 0 train
 ```
 
-### 3. Evaluation
+### 3. Fine-tuning
+Fine-tuning is merged into `train.py`; there is no separate fine-tuning script. Enable it in `config/params.yaml`:
+
+```yaml
+train:
+  resume:
+    enabled: true
+    checkpoint: "/path/to/checkpoint.pth"
+    strict: false  # Use false when fine-tuning older checkpoints without new modules.
+```
+
+### 4. Evaluation
 To evaluate the model and generate fused images alongside segmentation masks, simply change the mode to `test`:
 
 ```bash
-cd codes
 bash run_experiment.sh 0 test
 ```
 The outputs (fused images and predicted masks) will be automatically saved to the `test_results/` directory as specified in your `config.yaml`.
+
+When evaluating older checkpoints, keep this setting in `config/params.yaml`:
+
+```yaml
+test:
+  checkpoint_strict: false
+```
+
+With non-strict loading, all matching checkpoint parameters are loaded, while newly added parameters such as `high_frequency_controller.logits` keep their config-based initialization.
 
 ---
 
@@ -122,7 +174,7 @@ The outputs (fused images and predicted masks) will be automatically saved to th
 
 For quick inference and reproduction of the results reported in our paper, you can download our pre-trained weights from [Google Drive](https://drive.google.com/drive/folders/11dXQ-pkYgPVe9qD4AXCpv-XIn5JZIMGh?usp=sharing).
 
-Please place the downloaded `.pth` files into the `codes/model_data/` directory (create it if it does not exist) or specify the exact path in your `config.yaml`.
+Please place the downloaded `.pth` files into the root-level `model_data/` directory (create it if it does not exist) or specify the exact checkpoint path in `config.yaml` / `params.yaml`.
 
 ---
 
@@ -133,7 +185,7 @@ If you find this code, our dataset processing, or our methodology useful in your
 ```bibtex
 @article{ViRMFS2026,
   title={Wavelet-Driven Meta-Learning: Unifying Infrared-Visible Fusion and Semantic Segmentation for Robust Scene Perception},
-  author={Yihui Wang and Dengshi Li and Shichao Liu and Shiwei Hu and Zhiming Zhan},
+  author={Shichao Liu and Dengshi Li and Yihui Wang and Shiwei Hu and Zhiming Zhan},
   journal={The Visual Computer},
   year={2026}
 }
