@@ -7,7 +7,6 @@ import math
 import os
 import shutil
 import time
-from typing import Iterable, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,8 +14,6 @@ import torch
 import torch.distributed as dist
 from torch import optim
 from torch.cuda.amp import GradScaler, autocast
-# Keep the torch 1.x stateless API for the project's current runtime.
-from torch.nn.utils.stateless import functional_call
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
@@ -37,7 +34,14 @@ from utils.experiment import (
 from utils.losses import FusionLoss, ce_loss
 from utils.runtime import cleanup_runtime, quiet_logger, setup_runtime
 from utils.utils_logger import get_logger
-from utils.utils_meta import make_params_dict, split_mtr_mts
+from utils.utils_meta import (
+    build_meta_parameter_groups,
+    has_invalid_tensor,
+    maybe_clip_grad_norm,
+    resolve_meta_target,
+    run_meta_step,
+    split_mtr_mts,
+)
 
 
 def _build_loader(injector: ConfigInjector, split: str, batch_size: int, num_workers: int, resize_size, sampler=None):
@@ -57,6 +61,7 @@ def _build_loader(injector: ConfigInjector, split: str, batch_size: int, num_wor
     dataset = VIFSDataset(
         mode=split,
         resize_size=tuple(resize_size),
+        label_resize_interpolation=injector.test_config().get("label_resize_interpolation", "default") if split == "test" else injector.train_config().get("label_resize_interpolation", "nearest"),
         **injector.dataset_paths(split),
     )
     loader = DataLoader(
@@ -68,184 +73,6 @@ def _build_loader(injector: ConfigInjector, split: str, batch_size: int, num_wor
         sampler=sampler,
     )
     return dataset, loader
-
-
-def _named_params_by_prefix(model, prefixes: Iterable[str]) -> Tuple[Tuple[str, ...], Tuple[torch.nn.Parameter, ...]]:
-    """Select trainable parameters by name prefix.
-
-    Args:
-        model: Model or DDP-wrapped model.
-        prefixes: Accepted parameter-name prefixes.
-
-    Returns:
-        Tuple ``(names, params)``.
-    """
-    pairs = [
-        (name, param)
-        for name, param in model.named_parameters()
-        if param.requires_grad and any(name.startswith(prefix) for prefix in prefixes)
-    ]
-    if not pairs:
-        return tuple(), tuple()
-    names, params = zip(*pairs)
-    return tuple(names), tuple(params)
-
-
-def _named_params_containing(model, token: str) -> Tuple[Tuple[str, ...], Tuple[torch.nn.Parameter, ...]]:
-    """Select trainable parameters whose names contain a token.
-
-    Args:
-        model: Model or DDP-wrapped model.
-        token: Name fragment used for selection.
-
-    Returns:
-        Tuple ``(names, params)``.
-    """
-    pairs = [
-        (name, param)
-        for name, param in model.named_parameters()
-        if param.requires_grad and token in name
-    ]
-    if not pairs:
-        return tuple(), tuple()
-    names, params = zip(*pairs)
-    return tuple(names), tuple(params)
-
-
-def _has_invalid_tensor(value: torch.Tensor) -> bool:
-    """Check whether a tensor contains NaN or Inf values.
-
-    Args:
-        value: Tensor to inspect.
-
-    Returns:
-        True if the tensor has invalid numeric values.
-    """
-    return bool(torch.isnan(value).any() or torch.isinf(value).any())
-
-
-def _has_invalid_grads(grads: Iterable[torch.Tensor]) -> bool:
-    """Check whether any gradient tensor contains NaN or Inf.
-
-    Args:
-        grads: Gradient tensors.
-
-    Returns:
-        True if any gradient is numerically invalid.
-    """
-    return any(_has_invalid_tensor(grad) for grad in grads)
-
-
-def _assign_meta_grads(params, grads, context) -> None:
-    """Assign and synchronize manually computed meta gradients.
-
-    Args:
-        params: Target model parameters.
-        grads: Gradient tensors computed by ``torch.autograd.grad``.
-        context: Runtime context containing DDP state.
-
-    Returns:
-        None.
-    """
-    for param, grad in zip(params, grads):
-        param.grad = grad.detach().clone()
-    if context.distributed:
-        for param in params:
-            if param.grad is not None:
-                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
-                param.grad.data /= dist.get_world_size()
-
-
-def _maybe_clip(params, max_norm) -> None:
-    """Clip gradients when a maximum norm is configured.
-
-    Args:
-        params: Parameters whose gradients should be clipped.
-        max_norm: Maximum norm or ``None`` to disable clipping.
-
-    Returns:
-        None.
-    """
-    if max_norm is not None:
-        torch.nn.utils.clip_grad_norm_(params, max_norm=float(max_norm))
-
-
-def _meta_step(
-    model,
-    params,
-    names,
-    optimizer,
-    support_loss_fn,
-    query_loss_fn,
-    support_args,
-    query_args,
-    inner_lr: float,
-    use_amp: bool,
-    context,
-    grad_clip_norm,
-) -> bool:
-    """Run one MAML-style second-order update for a parameter subset.
-
-    Args:
-        model: Model or DDP-wrapped model.
-        params: Parameters updated by the meta step.
-        names: Names corresponding to ``params``.
-        optimizer: Optimizer for the selected parameter subset.
-        support_loss_fn: Callable that receives support model outputs and
-            returns a scalar loss.
-        query_loss_fn: Callable that receives query model outputs and returns a
-            scalar loss.
-        support_args: Positional model inputs for the inner-loop batch.
-        query_args: Positional model inputs for the outer-loop batch.
-        inner_lr: Inner-loop virtual update learning rate.
-        use_amp: Whether AMP autocast is enabled.
-        context: Runtime context containing DDP state.
-        grad_clip_norm: Optional gradient clipping norm.
-
-    Returns:
-        True if an optimizer step was applied, otherwise False.
-    """
-    if optimizer is None or not params:
-        return False
-
-    with autocast(enabled=use_amp):
-        support_outputs = model(*support_args, return_lists=True)
-        support_loss = support_loss_fn(support_outputs)
-
-    grads = torch.autograd.grad(
-        support_loss,
-        params,
-        create_graph=True,
-        retain_graph=True,
-        allow_unused=True,
-    )
-    grads = [grad if grad is not None else torch.zeros_like(param) for grad, param in zip(grads, params)]
-    if _has_invalid_grads(grads):
-        return False
-
-    updated = dict(make_params_dict(model))
-    for name, param, grad in zip(names, params, grads):
-        updated[name] = param - inner_lr * grad
-
-    with autocast(enabled=use_amp):
-        query_outputs = functional_call(
-            model,
-            updated,
-            query_args,
-            {"return_lists": True},
-        )
-        query_loss = query_loss_fn(query_outputs)
-
-    meta_grads = torch.autograd.grad(query_loss, params, retain_graph=False, allow_unused=True)
-    meta_grads = [grad if grad is not None else torch.zeros_like(param) for grad, param in zip(meta_grads, params)]
-    if _has_invalid_grads(meta_grads):
-        return False
-
-    optimizer.zero_grad(set_to_none=True)
-    _assign_meta_grads(params, meta_grads, context)
-    _maybe_clip(params, grad_clip_norm)
-    optimizer.step()
-    return True
 
 
 def _write_iou_csv_header(path: str, num_classes: int) -> None:
@@ -381,6 +208,7 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
     train_dataset = VIFSDataset(
         mode="train",
         resize_size=tuple(train_cfg["resize_size"]),
+        label_resize_interpolation=train_cfg.get("label_resize_interpolation", "nearest"),
         **injector.dataset_paths("train"),
     )
     train_sampler = DistributedSampler(train_dataset) if context.distributed else None
@@ -430,9 +258,10 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
     if context.distributed:
         model = DDP(model, device_ids=[context.local_rank], output_device=context.local_rank)
 
-    fusion_prefixes = ("module.f0", "module.f1", "module.f2", "module.f3", "module.fusion_head") if context.distributed else ("f0", "f1", "f2", "f3", "fusion_head")
-    fusion_names, fusion_params = _named_params_by_prefix(model, fusion_prefixes)
-    seg_names, seg_params = _named_params_containing(model, "decode_head")
+    fusion_names, fusion_params, seg_names, seg_params = build_meta_parameter_groups(
+        model,
+        distributed=context.distributed,
+    )
 
     opt_fusion = optim.Adam(fusion_params, lr=train_cfg["lr_f"]) if fusion_params else None
     opt_seg = optim.Adam(seg_params, lr=train_cfg["lr_seg"]) if seg_params else None
@@ -473,7 +302,6 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
     best_miou = -math.inf
     loss_history = {"Lf": [], "Lseg": []}
     meta_epoch_index = 0
-    inner_every = max(1, int(train_cfg["inner_every"]))
 
     for epoch in range(train_cfg["epochs"]):
         if context.distributed:
@@ -489,14 +317,12 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
         skipped_batches = 0
         meta_fusion_steps = 0
         meta_seg_steps = 0
-        should_meta_epoch = (
-            epoch >= int(train_cfg["inner_warmup"])
-            and ((epoch - int(train_cfg["inner_warmup"])) % inner_every == 0)
+        meta_target, meta_epoch_index = resolve_meta_target(
+            epoch=epoch,
+            inner_warmup=int(train_cfg["inner_warmup"]),
+            inner_every=int(train_cfg["inner_every"]),
+            meta_epoch_index=meta_epoch_index,
         )
-        meta_target = None
-        if should_meta_epoch:
-            meta_target = "fusion" if meta_epoch_index % 2 == 0 else "seg"
-            meta_epoch_index += 1
 
         for vi, ir, label in progress:
             vi = vi.to(context.device, non_blocking=True)
@@ -510,14 +336,14 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
                 loss_seg = ce_loss(seg, label)
                 loss_total = loss_fusion + loss_seg
 
-            if train_cfg["skip_invalid_loss"] and _has_invalid_tensor(loss_total):
+            if train_cfg["skip_invalid_loss"] and has_invalid_tensor(loss_total):
                 skipped_batches += 1
                 continue
 
             scaler.scale(loss_total).backward()
             if train_cfg.get("grad_clip_norm") is not None:
                 scaler.unscale_(opt_all)
-                _maybe_clip(model.parameters(), train_cfg["grad_clip_norm"])
+                maybe_clip_grad_norm(model.parameters(), train_cfg["grad_clip_norm"])
             scaler.step(opt_all)
             scaler.update()
 
@@ -531,7 +357,7 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
                     start = time.time()
                     meta_info["meta_branch"] = meta_target
                     if meta_target == "fusion":
-                        stepped = _meta_step(
+                        stepped = run_meta_step(
                             model=model,
                             params=fusion_params,
                             names=fusion_names,
@@ -548,7 +374,7 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
                         meta_info["meta_fusion"] = stepped
                         meta_fusion_steps += int(stepped)
                     else:
-                        stepped = _meta_step(
+                        stepped = run_meta_step(
                             model=model,
                             params=seg_params,
                             names=seg_names,
@@ -573,11 +399,11 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
                 loss_seg2 = ce_loss(seg2, label)
                 loss_total2 = loss_fusion2 + loss_seg2
 
-            if not (train_cfg["skip_invalid_loss"] and _has_invalid_tensor(loss_total2)):
+            if not (train_cfg["skip_invalid_loss"] and has_invalid_tensor(loss_total2)):
                 scaler.scale(loss_total2).backward()
                 if train_cfg.get("grad_clip_norm") is not None:
                     scaler.unscale_(opt_all)
-                    _maybe_clip(model.parameters(), train_cfg["grad_clip_norm"])
+                    maybe_clip_grad_norm(model.parameters(), train_cfg["grad_clip_norm"])
                 scaler.step(opt_all)
                 scaler.update()
             else:
@@ -606,7 +432,14 @@ def train(config_path: str = "config/config.yaml", params_path: str = "config/pa
             save_checkpoint(model_to_eval, latest_path)
 
             if (epoch + 1) % int(train_cfg["eval_every"]) == 0:
-                per_class_iou, miou = evaluate_miou(model_to_eval, test_loader, train_cfg["num_classes"], context.device, logger)
+                per_class_iou, miou = evaluate_miou(
+                    model_to_eval,
+                    test_loader,
+                    train_cfg["num_classes"],
+                    context.device,
+                    logger,
+                    include_absent_classes=bool(train_cfg.get("include_absent_classes_in_miou", False)),
+                )
                 _append_iou_csv(csv_path, epoch + 1, per_class_iou, miou)
                 if miou > best_miou:
                     best_miou = miou

@@ -1,95 +1,108 @@
-# utils_meta.py
-import os
 import torch
+import torch.distributed as dist
 import torch.nn as nn
+from torch.cuda.amp import autocast
+# from torch.nn.utils.stateless import functional_call # torch 1.x
+from torch.func import functional_call # torch 2.x
 
-# Checkpoint loading helpers.
-def _strip_module(sd: dict):
-    """Remove DDP ``module.`` prefixes from state-dict keys.
 
-    Args:
-        sd: Source state dictionary.
-
-    Returns:
-        State dictionary without ``module.`` prefixes.
-    """
-    return { (k[7:] if k.startswith("module.") else k): v for k, v in sd.items() }
-
-def _add_module(sd: dict):
-    """Add DDP ``module.`` prefixes to state-dict keys.
+def select_named_params_by_prefix(model, prefixes):
+    """Select trainable parameters by name prefix.
 
     Args:
-        sd: Source state dictionary.
+        model: Model or DDP-wrapped model.
+        prefixes: Iterable of accepted parameter-name prefixes.
 
     Returns:
-        State dictionary with ``module.`` prefixes.
+        Tuple ``(names, params)`` containing selected parameter names and
+        parameter tensors.
     """
-    return { (k if k.startswith("module.") else f"module.{k}"): v for k, v in sd.items() }
+    pairs = [
+        (name, param)
+        for name, param in model.named_parameters()
+        if param.requires_grad and any(name.startswith(prefix) for prefix in prefixes)
+    ]
+    if not pairs:
+        return tuple(), tuple()
+    names, params = zip(*pairs)
+    return tuple(names), tuple(params)
 
-def load_partial_weights(model, weight_path, device="cuda"):
-    """Load matching checkpoint weights into a model.
+
+def select_named_params_containing(model, token: str):
+    """Select trainable parameters whose names contain a token.
 
     Args:
-        model: Target model.
-        weight_path: Checkpoint path.
-        device: Device used for checkpoint loading.
+        model: Model or DDP-wrapped model.
+        token: Name fragment used for selection.
 
     Returns:
-        Model with compatible weights loaded.
+        Tuple ``(names, params)`` containing selected parameter names and
+        parameter tensors.
     """
-    if not os.path.exists(weight_path):
-        print(f"[WARN] Pretrained checkpoint not found: {weight_path}")
-        return model
+    pairs = [
+        (name, param)
+        for name, param in model.named_parameters()
+        if param.requires_grad and token in name
+    ]
+    if not pairs:
+        return tuple(), tuple()
+    names, params = zip(*pairs)
+    return tuple(names), tuple(params)
 
-    # Prefer safe loading when the installed PyTorch version supports it.
-    try:
-        ckpt = torch.load(weight_path, map_location=device, weights_only=True)
-    except TypeError:
-        ckpt = torch.load(weight_path, map_location=device)
 
-    if isinstance(ckpt, dict) and "state_dict" in ckpt:
-        sd = ckpt["state_dict"]
-    elif isinstance(ckpt, dict):
-        sd = ckpt
-    else:
-        raise ValueError("Unexpected checkpoint format")
-
-    model_dict = model.state_dict()
-
-    # Try raw keys, stripped DDP keys, and added DDP keys.
-    cands = [("raw", sd), ("strip", _strip_module(sd)), ("add", _add_module(sd))]
-
-    best_name, best_matched, best_dict = None, -1, None
-    for name, cand in cands:
-        matched = {k: v for k, v in cand.items() if k in model_dict and v.size() == model_dict[k].size()}
-        if len(matched) > best_matched:
-            best_matched = len(matched)
-            best_name, best_dict = name, matched
-
-    print(f"[INFO] Pretrained checkpoint: {weight_path}")
-    print(f"[INFO] Key format: {best_name}, matched parameters: {best_matched}/{len(model_dict)}")
-
-    model_dict.update(best_dict)
-    model.load_state_dict(model_dict, strict=False)
-    return model
-
-# Parameter helpers.
-# def get_fusion_param_names(m: nn.Module):
-#     keep_prefix = ("shallow1", "shallow2", "seg1", "seg2", "seg3", "fusion_task_head")
-#     names = [n for n, p in m.named_parameters() if any(n.startswith(k) for k in keep_prefix)]
-#     return names
-def get_fusion_param_names(m: nn.Module):
-    """Return parameter names belonging to the fusion branch.
+def build_meta_parameter_groups(model, distributed: bool):
+    """Build fusion and segmentation parameter groups for meta-learning.
 
     Args:
-        m: Model to inspect.
+        model: Model or DDP-wrapped model.
+        distributed: Whether the model is wrapped by DistributedDataParallel.
 
     Returns:
-        List of fusion parameter names.
+        Tuple ``(fusion_names, fusion_params, seg_names, seg_params)``.
     """
-    keep_prefix = ("f0", "f1", "f2", "f3", "fusion_head")
-    names = [n for n, p in m.named_parameters() if any(n.startswith(k) for k in keep_prefix)]
-    return names
+    fusion_prefixes = (
+        "module.f0",
+        "module.f1",
+        "module.f2",
+        "module.f3",
+        "module.fusion_head",
+    ) if distributed else (
+        "f0",
+        "f1",
+        "f2",
+        "f3",
+        "fusion_head",
+    )
+    fusion_names, fusion_params = select_named_params_by_prefix(model, fusion_prefixes)
+    seg_names, seg_params = select_named_params_containing(model, "decode_head")
+    return fusion_names, fusion_params, seg_names, seg_params
+
+
+def resolve_meta_target(epoch: int, inner_warmup: int, inner_every: int, meta_epoch_index: int):
+    """Resolve whether an epoch should run a meta step and which branch to use.
+
+    Args:
+        epoch: Zero-based training epoch index.
+        inner_warmup: Number of warmup epochs before meta-learning starts.
+        inner_every: Epoch interval for meta-learning after warmup.
+        meta_epoch_index: Number of previous meta epochs used for alternating
+            fusion and segmentation branches.
+
+    Returns:
+        Tuple ``(meta_target, next_meta_epoch_index)``. ``meta_target`` is
+        ``None`` when the epoch should not run meta-learning; otherwise it is
+        ``fusion`` or ``seg``.
+    """
+    safe_inner_every = max(1, int(inner_every))
+    should_meta_epoch = (
+        epoch >= int(inner_warmup)
+        and ((epoch - int(inner_warmup)) % safe_inner_every == 0)
+    )
+    if not should_meta_epoch:
+        return None, meta_epoch_index
+    meta_target = "fusion" if meta_epoch_index % 2 == 0 else "seg"
+    return meta_target, meta_epoch_index + 1
+
 
 def make_params_dict(m: nn.Module):
     """Convert model parameters to a name-parameter dictionary.
@@ -102,24 +115,160 @@ def make_params_dict(m: nn.Module):
     """
     return {name: p for name, p in m.named_parameters()}
 
+
+def has_invalid_tensor(value: torch.Tensor) -> bool:
+    """Check whether a tensor contains NaN or Inf values.
+
+    Args:
+        value: Tensor to inspect.
+
+    Returns:
+        True if the tensor has invalid numeric values.
+    """
+    return bool(torch.isnan(value).any() or torch.isinf(value).any())
+
+
+def has_invalid_grads(grads) -> bool:
+    """Check whether any gradient tensor contains NaN or Inf.
+
+    Args:
+        grads: Iterable of gradient tensors.
+
+    Returns:
+        True if any gradient is numerically invalid.
+    """
+    return any(has_invalid_tensor(grad) for grad in grads)
+
+
 def merge_updated_params(params_all, names_to_update, updates, inner_lr):
     """Build a virtual parameter dictionary for a meta-learning inner step.
 
     Args:
-        params_all: Full parameter dictionary.
-        names_to_update: Parameter names updated in the inner loop.
-        updates: Gradient tensors for selected parameters.
-        inner_lr: Inner-loop learning rate.
+        params_all: Full model parameter dictionary.
+        names_to_update: Names of parameters updated in the virtual inner loop.
+        updates: Gradient tensors corresponding to ``names_to_update``.
+        inner_lr: Inner-loop learning rate used for the virtual update.
 
     Returns:
-        New parameter dictionary with selected parameters updated.
+        New parameter dictionary with only the selected parameters updated.
     """
-    new_params = dict(params_all)
-    for name, g in zip(names_to_update, updates):
-        new_params[name] = params_all[name] - inner_lr * g
-    return new_params
+    updated_params = dict(params_all)
+    for name, grad in zip(names_to_update, updates):
+        # Keep untouched parameters shared and replace only the inner-loop subset.
+        updated_params[name] = params_all[name] - inner_lr * grad
+    return updated_params
 
-# Miscellaneous helpers.
+
+def assign_meta_grads(params, grads, context) -> None:
+    """Assign and synchronize manually computed meta gradients.
+
+    Args:
+        params: Target model parameters.
+        grads: Gradient tensors computed by ``torch.autograd.grad``.
+        context: Runtime context containing distributed-training state.
+
+    Returns:
+        None.
+    """
+    for param, grad in zip(params, grads):
+        param.grad = grad.detach().clone()
+    if context.distributed:
+        for param in params:
+            if param.grad is not None:
+                dist.all_reduce(param.grad.data, op=dist.ReduceOp.SUM)
+                param.grad.data /= dist.get_world_size()
+
+
+def maybe_clip_grad_norm(params, max_norm) -> None:
+    """Clip gradients when a maximum norm is configured.
+
+    Args:
+        params: Parameters whose gradients should be clipped.
+        max_norm: Maximum norm or ``None`` to disable clipping.
+
+    Returns:
+        None.
+    """
+    if max_norm is not None:
+        torch.nn.utils.clip_grad_norm_(params, max_norm=float(max_norm))
+
+
+def run_meta_step(
+    model,
+    params,
+    names,
+    optimizer,
+    support_loss_fn,
+    query_loss_fn,
+    support_args,
+    query_args,
+    inner_lr: float,
+    use_amp: bool,
+    context,
+    grad_clip_norm,
+) -> bool:
+    """Run one MAML-style second-order update for a parameter subset.
+
+    Args:
+        model: Model or DDP-wrapped model.
+        params: Parameters updated by the meta step.
+        names: Names corresponding to ``params``.
+        optimizer: Optimizer for the selected parameter subset.
+        support_loss_fn: Callable that receives support model outputs and
+            returns a scalar loss.
+        query_loss_fn: Callable that receives query model outputs and returns a
+            scalar loss.
+        support_args: Positional model inputs for the inner-loop batch.
+        query_args: Positional model inputs for the outer-loop batch.
+        inner_lr: Inner-loop virtual update learning rate.
+        use_amp: Whether AMP autocast is enabled.
+        context: Runtime context containing distributed-training state.
+        grad_clip_norm: Optional gradient clipping norm.
+
+    Returns:
+        True if an optimizer step was applied, otherwise False.
+    """
+    if optimizer is None or not params:
+        return False
+
+    with autocast(enabled=use_amp):
+        support_outputs = model(*support_args, return_lists=True)
+        support_loss = support_loss_fn(support_outputs)
+
+    grads = torch.autograd.grad(
+        support_loss,
+        params,
+        create_graph=True,
+        retain_graph=True,
+        allow_unused=True,
+    )
+    grads = [grad if grad is not None else torch.zeros_like(param) for grad, param in zip(grads, params)]
+    if has_invalid_grads(grads):
+        return False
+
+    updated = merge_updated_params(make_params_dict(model), names, grads, inner_lr)
+
+    with autocast(enabled=use_amp):
+        query_outputs = functional_call(
+            model,
+            updated,
+            query_args,
+            {"return_lists": True},
+        )
+        query_loss = query_loss_fn(query_outputs)
+
+    meta_grads = torch.autograd.grad(query_loss, params, retain_graph=False, allow_unused=True)
+    meta_grads = [grad if grad is not None else torch.zeros_like(param) for grad, param in zip(meta_grads, params)]
+    if has_invalid_grads(meta_grads):
+        return False
+
+    optimizer.zero_grad(set_to_none=True)
+    assign_meta_grads(params, meta_grads, context)
+    maybe_clip_grad_norm(params, grad_clip_norm)
+    optimizer.step()
+    return True
+
+
 def split_mtr_mts(x: torch.Tensor):
     """Split a batch into meta-train and meta-test halves.
 

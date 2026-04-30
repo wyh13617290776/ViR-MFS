@@ -254,9 +254,11 @@ class WTConv2d_VIF(nn.Module):
             if (curr_shape[2] % 2 > 0) or (curr_shape[3] % 2 > 0):
                 curr_pads = (0, curr_shape[3] % 2, 0, curr_shape[2] % 2)
                 curr_x_ll = F.pad(curr_x_ll, curr_pads)
+                curr_y_ll = F.pad(curr_y_ll, curr_pads)
 
             curr_x = wavelet.wavelet_2d_transform(curr_x_ll, self.wt_filter)
-            curr_y = wavelet.wavelet_2d_transform(curr_y_ll, self.iwt_filter)
+            # Both modalities must use the decomposition filter before inverse reconstruction.
+            curr_y = wavelet.wavelet_2d_transform(curr_y_ll, self.wt_filter)
             curr_x_ll = curr_x[:, :, 0, :, :]
             curr_y_ll = curr_y[:, :, 0, :, :]
 
@@ -281,7 +283,6 @@ class WTConv2d_VIF(nn.Module):
             curr_x_h = x_h_in_levels.pop()
             curr_y_ll = y_ll_in_levels.pop()
             curr_shape = shapes_in_levels.pop()
-            #print(curr_x_ll.shape)
             curr_x_ll = self.fusion(curr_x_ll, curr_y_ll)
 
             curr_x_ll = curr_x_ll + next_x_ll
@@ -332,10 +333,3 @@ class _ScaleModule(nn.Module):
             Scaled tensor with the same shape as ``x``.
         """
         return torch.mul(self.weight, x)
-
-
-if __name__ == '__main__':
-    model = WTConv2d_VIF(in_channels=16, out_channels=16)
-    x = torch.randn(1, 16, 640, 640)
-    x = model(x, x)
-    print(x.shape)

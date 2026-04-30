@@ -4,7 +4,7 @@
 
 Official PyTorch implementation of the paper: **"Wavelet-Driven Meta-Learning: Unifying Infrared-Visible Fusion and Semantic Segmentation for Robust Scene Perception"** (Currently under review / Submitted to *The Visual Computer*).
 
-> **Important Note for Readers:** > If you find this code, our dataset processing, or our methodology useful in your research, please kindly consider citing our manuscript submitted to *The Visual Computer*. (Citation details will be updated immediately upon publication).
+> **Important Note for Readers:** If you find this code, our dataset processing, or our methodology useful in your research, please kindly consider citing our manuscript submitted to *The Visual Computer*. Citation details will be updated immediately upon publication.
 
 ---
 
@@ -54,7 +54,9 @@ workspace/
 └── ViR-MFS/
     ├── config/
     │   ├── config.yaml         # Dataset, backbone, output, and checkpoint paths.
-    │   └── params.yaml         # Train/test/meta-learning/wavelet parameters.
+    │   ├── config_fmb_legacy.yaml # Legacy FMB dataset/checkpoint paths.
+    │   ├── params.yaml         # Strict train/test/meta-learning/wavelet parameters.
+    │   └── params_fmb_legacy.yaml # Legacy FMB 17-class checkpoint reproduction.
     ├── config_loader.py        # YAML loader and ConfigInjector.
     ├── data_pipeline/
     │   └── dataloader.py
@@ -74,6 +76,7 @@ workspace/
     │   ├── losses.py
     │   ├── metrics.py
     │   ├── runtime.py
+    │   ├── seg_visualization.py
     │   ├── utils_logger.py
     │   └── utils_meta.py
     ├── train.py                # Thin training entrypoint.
@@ -127,6 +130,10 @@ Hardcoded training/testing paths have been removed from the active entrypoints. 
 ### 1. Configuration
 * **`config.yaml`**: Ensure `dataset.root_dir` points to your `datasets/` folder and `backbone.pretrained_dir` points to `model_data/` or another pretrained-weight directory.
 * **`params.yaml`**: Configure training hyperparameters, testing parameters, meta-learning controls, resume/fine-tuning settings, and MWFM wavelet parameters.
+* **Dataset class counts**: MSRS uses valid label ids `0-8` and should use `num_classes: 9`. FMB uses valid label ids `0-14` and should normally use `num_classes: 15`. The FMB visualization palette defines 15 entries: background, road, sidewalk, building, lamp, sign, vegetation, sky, person, car, truck, bus, motorcycle, bicycle, and pole.
+* **Label resize policy**: `nearest` preserves integer semantic labels and is the strict segmentation setting. `default` reproduces the legacy `PIL.Image.resize(size)` behavior from the old test script and may create interpolated pseudo label ids, such as FMB ids `15` or `16`, which are not valid FMB palette classes.
+* **Legacy FMB checkpoints**: FMB checkpoints trained with `num_classes: 17` have a 17-channel segmentation head and cannot be loaded into a 15-class model because `decode_head.linear_pred` shapes differ. Use `config/params_fmb_legacy.yaml` to reproduce those old checkpoints.
+* **Segmentation visualization**: `test.visualization.palette` selects the semantic palette (`auto`, `MSRS`, or `FMB`). `save_pred_color` saves colorized predicted masks, while `save_label_color` saves colorized ground-truth labels for side-by-side inspection.
 * **MWFM high-frequency control**: `params.yaml -> wavelet.high_frequency_source` defaults to `visible`, preserving the asymmetric design. Supported values are `visible`, `infrared`, `mean`, and `sum`.
 * **Learnable high-frequency injection**: `params.yaml -> wavelet.high_frequency_injection` can be `learnable` or `static`. The learnable mode initializes from `high_frequency_source` and then optimizes visible/infrared high-frequency injection weights during training.
 * **Checkpoint compatibility**: old checkpoints trained before `HighFrequencyInjectionController` do not contain `f0/f1/f2.high_frequency_controller.logits`. Set `test.checkpoint_strict: false` for evaluation or `train.resume.strict: false` for fine-tuning old checkpoints. The new high-frequency controller is still created; missing logits are initialized from the current wavelet config instead of being loaded from the checkpoint.
@@ -136,7 +143,7 @@ Hardcoded training/testing paths have been removed from the active entrypoints. 
 Use the unified shell script to start training. The script automatically handles environment variables and memory optimization:
 
 ```bash
-# Usage: bash run_experiment.sh [GPU_ID] [MODE]
+# Usage: bash run_experiment.sh [GPU_ID] [MODE] [PARAMS_PATH] [CONFIG_PATH]
 bash run_experiment.sh 0 train
 ```
 
@@ -158,6 +165,26 @@ To evaluate the model and generate fused images alongside segmentation masks, si
 bash run_experiment.sh 0 test
 ```
 The outputs (fused images and predicted masks) will be automatically saved to the `test_results/` directory as specified in your `config.yaml`.
+
+To reproduce an old FMB checkpoint trained with a 17-class segmentation head, run:
+
+```bash
+bash run_experiment.sh 0 test config/params_fmb_legacy.yaml config/config_fmb_legacy.yaml
+```
+
+For strict FMB evaluation and new training, keep `num_classes: 15` and `label_resize_interpolation: nearest` in `config/params.yaml`.
+
+Semantic visualization is controlled in `config/params.yaml`:
+
+```yaml
+test:
+  visualization:
+    palette: "auto"        # auto uses config.yaml -> dataset.name.
+    save_pred_color: true  # Save colorized predicted segmentation masks.
+    save_label_color: true # Save colorized ground-truth label masks.
+```
+
+Raw prediction id masks are still saved in the existing `_seg` directory. Colorized prediction masks are saved to `_seg_color`, and colorized ground-truth labels are saved to `_seg_label_color`.
 
 When evaluating older checkpoints, keep this setting in `config/params.yaml`:
 

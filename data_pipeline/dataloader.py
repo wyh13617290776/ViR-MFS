@@ -9,7 +9,15 @@ from utils.common import RGB2YCrCb
 class VIFSDataset(Dataset):
     """Visible-infrared fusion and segmentation dataset."""
 
-    def __init__(self, mode, vi_dir, ir_dir, label_dir, resize_size=(640, 480)):
+    def __init__(
+        self,
+        mode,
+        vi_dir,
+        ir_dir,
+        label_dir,
+        resize_size=(640, 480),
+        label_resize_interpolation="nearest",
+    ):
         """Create a dataset instance.
 
         Args:
@@ -20,6 +28,9 @@ class VIFSDataset(Dataset):
             label_dir: Directory containing semantic labels.
             resize_size: Output size as ``(W, H)``. Use ``(None, None)`` to
                 keep original image sizes.
+            label_resize_interpolation: Interpolation mode used when resizing
+                semantic labels. ``nearest`` preserves class ids. ``default``
+                reproduces the legacy ``PIL.Image.resize(size)`` behavior.
 
         Returns:
             None.
@@ -30,11 +41,29 @@ class VIFSDataset(Dataset):
         self.ir_dir = ir_dir
         self.label_dir = label_dir
         self.resize_size = resize_size
+        self.label_resize_interpolation = label_resize_interpolation
         self.to_tensor = transforms.ToTensor()
 
         if not os.path.exists(self.vi_dir):
             raise FileNotFoundError(f"Directory does not exist: {self.vi_dir}")
         self.file_list = sorted(os.listdir(self.vi_dir))
+
+    def _resize_label(self, label_image):
+        """Resize a semantic label image.
+
+        Args:
+            label_image: PIL image containing integer semantic class ids.
+
+        Returns:
+            Resized PIL label image.
+        """
+        if self.label_resize_interpolation == "default":
+            return label_image.resize(self.resize_size)
+        if self.label_resize_interpolation == "nearest":
+            return label_image.resize(self.resize_size, resample=Image.NEAREST)
+        raise ValueError(
+            "label_resize_interpolation must be either 'nearest' or 'default'"
+        )
 
     def __len__(self):
         """Return the number of visible-image samples.
@@ -72,7 +101,7 @@ class VIFSDataset(Dataset):
             if self.resize_size[0] is not None:
                 vi_image = vi_image.resize(self.resize_size)
                 ir_image = ir_image.resize(self.resize_size)
-                label_image = label_image.resize(self.resize_size, resample=Image.NEAREST)
+                label_image = self._resize_label(label_image)
                 
             vi_image = self.to_tensor(vi_image)
             ir_image = self.to_tensor(ir_image)
@@ -92,7 +121,7 @@ class VIFSDataset(Dataset):
             if self.resize_size[0] is not None:
                 vi_image_color = vi_image_color.resize(self.resize_size)
                 ir_image = ir_image.resize(self.resize_size)
-                label_image = label_image.resize(self.resize_size, resample=Image.NEAREST)
+                label_image = self._resize_label(label_image)
 
             label_np = np.array(label_image, dtype=np.uint8)
             label_tensor = torch.from_numpy(label_np).long()

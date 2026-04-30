@@ -202,7 +202,7 @@ class SegFormer(nn.Module):
         self.f1 = WTConv2d_VIF(in_channels=self.in_channels[1], out_channels=self.in_channels[1], **wavelet_config)
         self.f2 = WTConv2d_VIF(in_channels=self.in_channels[2], out_channels=self.in_channels[2], **wavelet_config)
         self.f3 = nn.Conv2d(in_channels=self.in_channels[3]*2, out_channels=self.in_channels[3], kernel_size=1, stride=1, padding=0)
-        
+
         # ---------------- wo_MWFM ----------------
         # Convolutional fallback used by ablation experiments.
         # self.f0 = nn.Conv2d(in_channels=self.in_channels[0] * 2, out_channels=self.in_channels[0], kernel_size=3, padding=1)
@@ -210,7 +210,6 @@ class SegFormer(nn.Module):
         # self.f2 = nn.Conv2d(in_channels=self.in_channels[2] * 2, out_channels=self.in_channels[2], kernel_size=3, padding=1)
         # self.f3 = nn.Conv2d(in_channels=self.in_channels[3] * 2, out_channels=self.in_channels[3], kernel_size=1)
         # ---------------- wo_MWFM ----------------
-
     def forward(self, inputs, inputs_ir,return_lists=False):
         """Run fusion and segmentation forward pass.
 
@@ -229,7 +228,7 @@ class SegFormer(nn.Module):
         
         x = self.backbone.forward(torch.cat([inputs]*3, dim=1))
         x_ir = self.backbone.forward(torch.cat([inputs_ir]*3, dim=1))
-        # Default asymmetric MWFM path used for training and testing.
+        # Fuse multi-scale visible and infrared features with MWFM on shallow stages.
         # ---------------- modify_1 ----------------
         f_feature = list(x)
         f_feature[0] = self.f0(x[0], x_ir[0])
@@ -327,10 +326,3 @@ class SegFormer_s_modal(nn.Module):
         seg = self.decode_head.forward(x)
         seg = F.interpolate(seg, size=(H, W), mode='bilinear', align_corners=True)
         return seg
-
-if __name__ == '__main__':
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = SegFormer(num_classes=21).to(device)
-    img = torch.randn(1, 1, 640, 480).to(device)
-    y, img = model(img, img)
-    print(y.shape, img.shape)

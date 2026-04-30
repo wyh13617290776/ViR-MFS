@@ -1,0 +1,60 @@
+# ==========================================
+# Legacy FMB parameters for reproducing old 17-class checkpoints.
+# Do not use this file for strict semantic segmentation evaluation.
+# ==========================================
+
+wavelet:
+  kernel_size: 5
+  wt_levels: 1
+  wt_type: "db1"
+  # Preserve the original asymmetric MWFM behavior.
+  high_frequency_source: "visible"
+  high_frequency_injection: "static"
+  high_frequency_init_strength: 4.0
+  high_frequency_temperature: 1.0
+
+train:
+  batch_size: 4
+  num_workers: 4
+  epochs: 300
+  # Legacy FMB checkpoints were trained with 17 output channels because old
+  # label resizing could create pseudo ids 15 and 16.
+  num_classes: 17
+  resize_size: [640, 480]
+  label_resize_interpolation: "default"
+
+  lr_f: 5.0e-5
+  lr_seg: 5.0e-5
+  lr_all: 5.0e-4
+
+  lambda_g: 0.1
+  inner_lr: 1.0e-5
+  inner_every: 3
+  inner_warmup: 1
+  eval_every: 1
+  include_absent_classes_in_miou: false
+
+  use_amp: true
+  use_pretrained: true
+  skip_invalid_loss: true
+  grad_clip_norm: null
+
+  resume:
+    enabled: false
+    checkpoint: ""
+    strict: true
+
+test:
+  batch_size: 1
+  num_workers: 4
+  # This must match old FMB checkpoint heads with shape [17, 256, 1, 1].
+  num_classes: 17
+  resize_size: [640, 480]
+  # Reproduce the legacy PIL label resizing behavior from the old test.py.
+  label_resize_interpolation: "default"
+  checkpoint_strict: false
+  include_absent_classes_in_miou: false
+  visualization:
+    palette: "auto"
+    save_pred_color: true
+    save_label_color: true

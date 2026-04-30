@@ -20,6 +20,7 @@ from utils.experiment import (
     write_json,
     write_yaml,
 )
+from utils.seg_visualization import get_palette
 from utils.utils_logger import get_logger
 
 
@@ -39,6 +40,14 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
     fusion_save_dir, seg_save_dir = injector.test_save_dirs()
     os.makedirs(fusion_save_dir, exist_ok=True)
     os.makedirs(seg_save_dir, exist_ok=True)
+    visualization_cfg = dict(test_cfg.get("visualization", {}) or {})
+    save_pred_color = bool(visualization_cfg.get("save_pred_color", True))
+    save_label_color = bool(visualization_cfg.get("save_label_color", True))
+    palette_name = str(visualization_cfg.get("palette", "auto"))
+    palette_dataset = injector.dataset_name if palette_name.lower() == "auto" else palette_name
+    palette = get_palette(palette_dataset) if save_pred_color or save_label_color else None
+    pred_color_save_dir = f"{seg_save_dir}_color" if save_pred_color else None
+    label_color_save_dir = f"{seg_save_dir}_label_color" if save_label_color else None
 
     run_id = create_run_id("test")
     trace_dir = prepare_trace_dir(fusion_save_dir, run_id, str(injector.project_root))
@@ -50,6 +59,10 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
     logger.info(f"Checkpoint: {checkpoint_path}")
     logger.info(f"Fused images: {fusion_save_dir}")
     logger.info(f"Segmentation masks: {seg_save_dir}")
+    if pred_color_save_dir:
+        logger.info(f"Colorized predicted masks: {pred_color_save_dir}")
+    if label_color_save_dir:
+        logger.info(f"Colorized ground-truth labels: {label_color_save_dir}")
     shutil.copy(config_path, os.path.join(trace_dir, "config.yaml"))
     shutil.copy(params_path, os.path.join(trace_dir, "params.yaml"))
     write_yaml(os.path.join(trace_dir, "resolved_config.yaml"), {
@@ -65,6 +78,7 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
     dataset = VIFSDataset(
         mode="test",
         resize_size=tuple(test_cfg["resize_size"]),
+        label_resize_interpolation=test_cfg.get("label_resize_interpolation", "default"),
         **injector.dataset_paths("test"),
     )
     loader = DataLoader(
@@ -83,6 +97,12 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
             "checkpoint": checkpoint_path,
             "fusion_save_dir": fusion_save_dir,
             "seg_save_dir": seg_save_dir,
+            "pred_color_save_dir": pred_color_save_dir,
+            "label_color_save_dir": label_color_save_dir,
+            "visualization": {
+                **visualization_cfg,
+                "resolved_palette": palette_dataset,
+            },
             "trace_dir": trace_dir,
             "test_dataset_size": len(dataset),
             "device": str(device),
@@ -115,7 +135,7 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
         logger.warning(f"Checkpoint not found, using random weights: {checkpoint_path}")
     write_json(os.path.join(trace_dir, "checkpoint_load.json"), checkpoint_report)
 
-    per_class_iou, mean_iou = run_test_inference(
+    per_class_iou, mean_iou, label_report = run_test_inference(
         model=model,
         data_loader=loader,
         num_classes=test_cfg["num_classes"],
@@ -123,6 +143,10 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
         fusion_save_dir=fusion_save_dir,
         seg_save_dir=seg_save_dir,
         logger=logger,
+        include_absent_classes=bool(test_cfg.get("include_absent_classes_in_miou", False)),
+        palette=palette,
+        pred_color_save_dir=pred_color_save_dir,
+        label_color_save_dir=label_color_save_dir,
     )
     write_json(os.path.join(trace_dir, "metrics.json"), {
         "mIoU": mean_iou,
@@ -131,6 +155,14 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
             for value in per_class_iou
         ],
         "num_classes": test_cfg["num_classes"],
+        "include_absent_classes_in_miou": bool(test_cfg.get("include_absent_classes_in_miou", False)),
+        "visualization": {
+            **visualization_cfg,
+            "resolved_palette": palette_dataset,
+            "pred_color_save_dir": pred_color_save_dir,
+            "label_color_save_dir": label_color_save_dir,
+        },
+        "label_report": label_report,
     })
     logger.info(f"Final Mean IoU (mIoU): {mean_iou:.4f}")
     logger.info("Testing finished.")

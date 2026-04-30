@@ -271,6 +271,7 @@ class ConfigInjector:
         train_cfg.setdefault("num_workers", 4)
         train_cfg.setdefault("epochs", 200)
         train_cfg.setdefault("resize_size", [640, 480])
+        train_cfg.setdefault("label_resize_interpolation", "nearest")
         train_cfg.setdefault("use_amp", True)
         train_cfg.setdefault("lr_f", 5.0e-5)
         train_cfg.setdefault("lr_seg", 5.0e-5)
@@ -281,6 +282,7 @@ class ConfigInjector:
         train_cfg.setdefault("grad_clip_norm", None)
         train_cfg.setdefault("skip_invalid_loss", True)
         train_cfg.setdefault("eval_every", 1)
+        train_cfg.setdefault("include_absent_classes_in_miou", False)
         train_cfg.setdefault("resume", {})
         return train_cfg
 
@@ -298,7 +300,14 @@ class ConfigInjector:
         test_cfg.setdefault("num_workers", 4)
         test_cfg.setdefault("resize_size", [640, 480])
         test_cfg.setdefault("num_classes", self.train_config().get("num_classes", 9))
+        test_cfg.setdefault("label_resize_interpolation", "default")
         test_cfg.setdefault("checkpoint_strict", False)
+        test_cfg.setdefault("include_absent_classes_in_miou", False)
+        visualization_cfg = dict(test_cfg.get("visualization", {}) or {})
+        visualization_cfg.setdefault("palette", "auto")
+        visualization_cfg.setdefault("save_pred_color", True)
+        visualization_cfg.setdefault("save_label_color", True)
+        test_cfg["visualization"] = visualization_cfg
         return test_cfg
 
     def train_save_dir(self) -> str:

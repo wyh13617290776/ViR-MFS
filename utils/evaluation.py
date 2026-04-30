@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import torch
@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from utils.common import YCrCb2RGB
 from utils.metrics import SegmentationMetric
+from utils.seg_visualization import save_colorized_label
 
 
 def save_image(tensor: torch.Tensor, path: str) -> None:
@@ -36,7 +37,14 @@ def save_image(tensor: torch.Tensor, path: str) -> None:
 
 
 @torch.no_grad()
-def evaluate_miou(model, data_loader: DataLoader, num_classes: int, device, logger) -> Tuple[list, float]:
+def evaluate_miou(
+    model,
+    data_loader: DataLoader,
+    num_classes: int,
+    device,
+    logger,
+    include_absent_classes: bool = False,
+) -> Tuple[list, float]:
     """Evaluate semantic segmentation mIoU.
 
     Args:
@@ -45,6 +53,8 @@ def evaluate_miou(model, data_loader: DataLoader, num_classes: int, device, logg
         num_classes: Number of semantic classes.
         device: Torch device used for inference.
         logger: Logger used for per-class metric output.
+        include_absent_classes: Whether classes absent from both prediction and
+            ground truth should contribute ``0`` to mIoU.
 
     Returns:
         Tuple ``(per_class_iou, mean_iou)``.
@@ -61,16 +71,23 @@ def evaluate_miou(model, data_loader: DataLoader, num_classes: int, device, logg
         seg_pred = torch.argmax(seg_logits, dim=1)
         metric.add_batch(label_tensor.cpu().numpy(), seg_pred.cpu().numpy())
 
-    return summarize_iou(metric, num_classes, logger)
+    return summarize_iou(metric, num_classes, logger, include_absent_classes)
 
 
-def summarize_iou(metric: SegmentationMetric, num_classes: int, logger) -> Tuple[list, float]:
+def summarize_iou(
+    metric: SegmentationMetric,
+    num_classes: int,
+    logger,
+    include_absent_classes: bool = False,
+) -> Tuple[list, float]:
     """Summarize IoU values from a metric accumulator.
 
     Args:
         metric: Segmentation metric accumulator.
         num_classes: Number of semantic classes.
         logger: Logger used for per-class metric output.
+        include_absent_classes: Whether classes absent from both prediction and
+            ground truth should contribute ``0`` to mIoU.
 
     Returns:
         Tuple ``(per_class_iou, mean_iou)``.
@@ -86,13 +103,89 @@ def summarize_iou(metric: SegmentationMetric, num_classes: int, logger) -> Tuple
             per_class_iou.append(iou)
             logger.info(f"  Class {cls:02d}: IoU = {iou:.4f} ({intersection[cls]}/{union[cls]})")
         else:
-            per_class_iou.append(np.nan)
-            logger.info(f"  Class {cls:02d}: no samples in GT")
+            if include_absent_classes:
+                per_class_iou.append(0.0)
+                logger.info(f"  Class {cls:02d}: IoU = 0.0000 (absent from union)")
+            else:
+                per_class_iou.append(np.nan)
+                logger.info(f"  Class {cls:02d}: no samples in GT")
 
     valid_ious = [value for value in per_class_iou if not np.isnan(value)]
     mean_iou = float(np.mean(valid_ious)) if valid_ious else 0.0
+    logger.info(f"Absent classes included in mIoU: {include_absent_classes}")
     logger.info(f"Current Eval mIoU = {mean_iou:.4f}")
     return per_class_iou, mean_iou
+
+
+def update_label_histogram(histogram: Optional[np.ndarray], label_array: np.ndarray) -> np.ndarray:
+    """Accumulate raw ground-truth label id counts.
+
+    Args:
+        histogram: Existing histogram or ``None`` for the first batch.
+        label_array: Ground-truth label array from one batch.
+
+    Returns:
+        Updated label histogram where index equals label id.
+    """
+    labels = label_array.astype(np.int64).reshape(-1)
+    labels = labels[labels >= 0]
+    if labels.size == 0:
+        return np.zeros(0, dtype=np.int64) if histogram is None else histogram
+
+    batch_hist = np.bincount(labels)
+    if histogram is None:
+        return batch_hist.astype(np.int64)
+    if batch_hist.shape[0] > histogram.shape[0]:
+        histogram = np.pad(histogram, (0, batch_hist.shape[0] - histogram.shape[0]))
+    histogram[:batch_hist.shape[0]] += batch_hist
+    return histogram
+
+
+def summarize_label_distribution(label_histogram: Optional[np.ndarray], num_classes: int, logger) -> dict:
+    """Summarize label ids observed during evaluation.
+
+    Args:
+        label_histogram: Raw ground-truth label id histogram.
+        num_classes: Number of classes configured for the model and metric.
+        logger: Logger used for diagnostics.
+
+    Returns:
+        Dictionary containing observed, ignored, and absent class ids.
+    """
+    if label_histogram is None:
+        label_histogram = np.zeros(0, dtype=np.int64)
+
+    observed_labels = [int(idx) for idx, count in enumerate(label_histogram) if count > 0]
+    ignored_labels = [label for label in observed_labels if label >= num_classes]
+    absent_gt_classes = [
+        int(cls)
+        for cls in range(num_classes)
+        if cls >= len(label_histogram) or label_histogram[cls] == 0
+    ]
+    valid_gt_classes = [cls for cls in range(num_classes) if cls not in absent_gt_classes]
+
+    if ignored_labels:
+        logger.warning(
+            "Ground-truth label ids %s are >= num_classes=%s and are ignored by IoU. "
+            "Increase num_classes or remap ignore labels if these ids are real classes.",
+            ignored_labels,
+            num_classes,
+        )
+    if absent_gt_classes:
+        logger.info(f"Classes absent from GT under num_classes={num_classes}: {absent_gt_classes}")
+
+    return {
+        "observed_labels": observed_labels,
+        "ignored_labels": ignored_labels,
+        "absent_gt_classes": absent_gt_classes,
+        "valid_gt_classes": valid_gt_classes,
+        "num_classes": int(num_classes),
+        "label_pixel_count": {
+            str(idx): int(count)
+            for idx, count in enumerate(label_histogram)
+            if count > 0
+        },
+    }
 
 
 @torch.no_grad()
@@ -104,7 +197,11 @@ def run_test_inference(
     fusion_save_dir: str,
     seg_save_dir: str,
     logger,
-) -> Tuple[list, float]:
+    include_absent_classes: bool = False,
+    palette: Optional[np.ndarray] = None,
+    pred_color_save_dir: Optional[str] = None,
+    label_color_save_dir: Optional[str] = None,
+) -> Tuple[list, float, dict]:
     """Run testing inference, save outputs, and compute mIoU.
 
     Args:
@@ -115,13 +212,23 @@ def run_test_inference(
         fusion_save_dir: Directory for fused RGB images.
         seg_save_dir: Directory for predicted segmentation masks.
         logger: Logger used for progress and metrics.
+        include_absent_classes: Whether classes absent from both prediction and
+            ground truth should contribute ``0`` to mIoU.
+        palette: Optional RGB palette for semantic visualization.
+        pred_color_save_dir: Optional directory for colorized predictions.
+        label_color_save_dir: Optional directory for colorized ground-truth labels.
 
     Returns:
-        Tuple ``(per_class_iou, mean_iou)``.
+        Tuple ``(per_class_iou, mean_iou, label_report)``.
     """
     os.makedirs(fusion_save_dir, exist_ok=True)
     os.makedirs(seg_save_dir, exist_ok=True)
+    if pred_color_save_dir is not None:
+        os.makedirs(pred_color_save_dir, exist_ok=True)
+    if label_color_save_dir is not None:
+        os.makedirs(label_color_save_dir, exist_ok=True)
     metric = SegmentationMetric(num_classes)
+    label_histogram = None
     model.eval()
 
     for vi_y, ir_image, label_tensor, name, cb, cr in tqdm(data_loader, total=len(data_loader)):
@@ -133,12 +240,33 @@ def run_test_inference(
 
         fused_img, seg_logits = model(vi_y, ir_image)
         seg_pred = torch.argmax(seg_logits, dim=1)
+        label_np = label_tensor.cpu().numpy()
+        label_histogram = update_label_histogram(label_histogram, label_np)
         for item_idx, file_name in enumerate(name):
             # Save each item in the batch so test.batch_size can be configured.
             fused_rgb = YCrCb2RGB(fused_img[item_idx], cb[item_idx], cr[item_idx])
             save_image(fused_rgb, os.path.join(fusion_save_dir, file_name))
             seg_mask = Image.fromarray(seg_pred[item_idx].cpu().numpy().astype(np.uint8))
             seg_mask.save(os.path.join(seg_save_dir, file_name))
-        metric.add_batch(label_tensor.cpu().numpy(), seg_pred.cpu().numpy())
+            if palette is not None and pred_color_save_dir is not None:
+                save_colorized_label(
+                    seg_pred[item_idx].cpu().numpy().astype(np.uint8),
+                    palette,
+                    os.path.join(pred_color_save_dir, file_name),
+                )
+            if palette is not None and label_color_save_dir is not None:
+                save_colorized_label(
+                    label_np[item_idx].astype(np.uint8),
+                    palette,
+                    os.path.join(label_color_save_dir, file_name),
+                )
+        metric.add_batch(label_np, seg_pred.cpu().numpy())
 
-    return summarize_iou(metric, num_classes, logger)
+    per_class_iou, mean_iou = summarize_iou(
+        metric,
+        num_classes,
+        logger,
+        include_absent_classes=include_absent_classes,
+    )
+    label_report = summarize_label_distribution(label_histogram, num_classes, logger)
+    return per_class_iou, mean_iou, label_report

@@ -1,25 +1,25 @@
 #!/bin/bash
 
-# --- 严格配置 ---
+# --- Strict configuration ---
 ENV_NAME="metafusion_venv"
 PYTHON_VER="3.10"
 PYTHON_PATH="/usr/local/bin/python3.10"
 TARGET_DIR=$(pwd)
 
-# 强制清空代理
+# Clear proxy variables to avoid accidental mirror routing.
 unset http_proxy https_proxy all_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY
 
 echo "------------------------------------------------"
-echo "🚀 ViR_MFS 环境部署 (Torch 2.3.0 + CU118 + python 3.10)"
+echo "ViR_MFS environment setup (Torch 2.3.0 + CU118 + Python 3.10)"
 echo "------------------------------------------------"
 
-# --- 智能安装函数 (优先使用官方源确保元数据最新) ---
+# --- Smart pip installer. Prefer PyPI first, then fall back to mirrors. ---
 smart_pip_install() {
     local args="$1"
     local mirrors=("https://pypi.org/simple" "https://mirrors.aliyun.com/pypi/simple/" "https://pypi.tuna.tsinghua.edu.cn/simple")
     
     for mirror in "${mirrors[@]}"; do
-        echo "📡 尝试源: $mirror ..."
+        echo "Trying package index: $mirror ..."
         if pip install $args -i "$mirror" --timeout 30 --retries 1; then
             return 0
         fi
@@ -27,7 +27,7 @@ smart_pip_install() {
     return 1
 }
 
-# --- Python 版本检测与编译 ---
+# --- Python version detection and optional source build. ---
 check_python_exists() {
     if [ -f "$PYTHON_PATH" ] || command -v python3.10 &> /dev/null; then
         return 0
@@ -38,13 +38,13 @@ check_python_exists() {
 
 if check_python_exists; then
     [ ! -f "$PYTHON_PATH" ] && PYTHON_PATH=$(command -v python3.10)
-    echo "✅ 系统已存在 Python 3.10 ($PYTHON_PATH)。"
+    echo "Python 3.10 already exists: $PYTHON_PATH"
 else
-    echo "🛠️ 1/7: 配置编译环境..."
+    echo "1/7: Installing Python build dependencies..."
     sudo apt update
     sudo apt install -y build-essential zlib1g-dev libncurses-dev libgdbm-dev \
     libnss3-dev libssl-dev libreadline-dev libffi-dev libsqlite3-dev wget libbz2-dev liblzma-dev
-    echo "🔍 2/7: 编译 Python $PYTHON_VER..."
+    echo "2/7: Building Python $PYTHON_VER..."
     PY_TGZ="Python-$PYTHON_VER.tgz"
     wget -c "https://www.python.org/ftp/python/$PYTHON_VER/$PY_TGZ"
     tar -xzf "$PY_TGZ"
@@ -56,35 +56,35 @@ else
     rm -rf "Python-$PYTHON_VER" && rm -f "$PY_TGZ"
 fi
 
-# 3. 创建虚拟环境
-echo "📦 3/7: 创建 3.10 虚拟环境..."
+# 3. Create the virtual environment.
+echo "3/7: Creating Python 3.10 virtual environment..."
 $PYTHON_PATH -m venv $ENV_NAME
 source $ENV_NAME/bin/activate
 
-# 4. 升级核心构建工具 (直接规避 wheel/packaging 冲突)
-echo "🆙 4/7: 升级构建基础环境..."
+# 4. Upgrade core build tools to avoid wheel/packaging conflicts.
+echo "4/7: Upgrading base build tools..."
 smart_pip_install "--upgrade pip setuptools wheel packaging"
 
-# 5. 安装 Torch 2.3.0(CU118)
-echo "💿 5/7: 安装 Torch 2.3.0 和 Torchvision 0.18.0 (CU118)..."
+# 5. Install Torch 2.3.0 with CUDA 11.8 wheels.
+echo "5/7: Installing Torch 2.3.0 and Torchvision 0.18.0 (CU118)..."
 if pip install torch==2.3.0+cu118 torchvision==0.18.0+cu118 --extra-index-url https://download.pytorch.org/whl/cu118; then
-    echo "✅ Torch 安装成功。"
+    echo "Torch installation succeeded."
 else
-    echo "❌ Torch 安装失败，请检查网络。"
+    echo "Torch installation failed. Check your network or CUDA wheel index."
     exit 1
 fi
 
-# 6. 安装业务清单
+# 6. Install project dependencies.
 if [ -f "requirements.txt" ]; then
-    echo "📋 6/7: 正在安装业务依赖..."
+    echo "6/7: Installing project dependencies..."
     
-    # 强制修复 pycocotools 孤岛编译环境
-    echo "🔧 优先构建 pycocotools..."
+    # Build pycocotools with compatible build-time dependencies first.
+    echo "Preparing pycocotools build dependencies..."
     smart_pip_install "Cython<3.0.0 numpy<2.0.0"
     smart_pip_install "pycocotools --no-build-isolation --no-cache-dir"
     
-    # 批量安装剩余的安全依赖 (带有官方源兜底)
-    echo "📦 正在安装 requirements.txt..."
+    # Install the remaining dependencies with PyPI-first fallback behavior.
+    echo "Installing requirements.txt..."
     if smart_pip_install "-r requirements.txt --extra-index-url https://download.pytorch.org/whl/cu118"; then
         INSTALL_STATUS=0
     else
@@ -94,15 +94,15 @@ else
     INSTALL_STATUS=0
 fi
 
-# 7. 最终校验
+# 7. Final validation.
 if [ $INSTALL_STATUS -eq 0 ]; then
     echo "------------------------------------------------"
-    echo "🧹 部署成功！执行最终自检..."
-    python -c "import torch; print('🚀 CUDA 状态:', torch.cuda.is_available()); print('📦 Torch 版本:', torch.__version__)"
+    echo "Setup completed. Running final validation..."
+    python -c "import torch; print('CUDA available:', torch.cuda.is_available()); print('Torch version:', torch.__version__)"
     echo "------------------------------------------------"
 else
-    echo "⚠️ 依赖安装中途出错。"
+    echo "Dependency installation failed."
     exit 1
 fi
 
-exec bash --rcfile <(echo "source ~/.bashrc; source $TARGET_DIR/$ENV_NAME/bin/activate; echo '🔥 环境已就绪！'")
+exec bash --rcfile <(echo "source ~/.bashrc; source $TARGET_DIR/$ENV_NAME/bin/activate; echo 'Environment is ready.'")

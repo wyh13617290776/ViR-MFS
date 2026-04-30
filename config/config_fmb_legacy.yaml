@@ -1,0 +1,21 @@
+# ==========================================
+# Project paths for reproducing legacy FMB 17-class checkpoints.
+# Use with config/params_fmb_legacy.yaml.
+# ==========================================
+model_name: "SegFormer"
+
+backbone:
+  phi: "b0"
+  pretrained_dir: "model_data"
+
+dataset:
+  name: "FMB"
+  root_dir: "../datasets"
+
+train:
+  save_base_dir: "runs"
+
+test:
+  save_base_dir: "test_results"
+  # This checkpoint was trained with a 17-channel FMB segmentation head.
+  checkpoint_name: "fmb_b0_meta_modify_1.pth"

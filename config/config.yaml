@@ -4,7 +4,7 @@
 model_name: "SegFormer"
 
 backbone:
-  phi: "b0"                                                 # Backbone variant: b0, b1, b2, b3, b4, b5.
+  phi: "b0"                                                 # Backbone variant: b0, b1, b2, b3.
   pretrained_dir: "model_data"                              # Directory for pretrained SegFormer backbone weights.
 
 dataset:
@@ -19,4 +19,4 @@ test:
   # Short names such as "best_mIoU" and "meta_latest" are expanded to
   # "{dataset}_{phi}_{name}.pth" inside the training output directory.
   # Absolute paths and explicit "*.pth" file names are also supported.
-  checkpoint_name: "msrs_b0_meta_modify_1.pth"
+  checkpoint_name: "best_mIoU" # msrs_b0_meta_modify_1.pth
