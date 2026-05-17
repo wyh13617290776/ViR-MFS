@@ -43,10 +43,8 @@ train:
   skip_invalid_loss: true
   grad_clip_norm: null
 
-  # Fine-tuning and resume are now part of train.py. Set enabled=true and
-  # provide either an absolute path or a checkpoint name accepted by config.yaml.
-  # Set strict=false when resuming from checkpoints trained before newly added
-  # modules, such as HighFrequencyInjectionController.
+  # Fine-tuning and resume are part of train.py. Set enabled=true and provide
+  # either an absolute path or a checkpoint name accepted by config.yaml.
   resume:
     enabled: false
     checkpoint: ""
@@ -56,14 +54,11 @@ test:
   batch_size: 1
   num_workers: 4
   # MSRS uses 9 valid ids: 0-8. FMB uses 15 valid ids: 0-14.
-  # Do not set FMB to 17 unless your labels really contain valid ids 15 and 16.
   num_classes: 9
   resize_size: [640, 480]
-  # Use "default" to reproduce legacy PIL label resizing from the old test.py.
   # Use "nearest" to preserve integer semantic class ids.
   label_resize_interpolation: "nearest"
-  # False allows old checkpoints trained before HighFrequencyInjectionController
-  # to initialize newly added high-frequency logits from the current config.
+  # Set true when a checkpoint must match the model exactly.
   checkpoint_strict: false
   # False follows common segmentation practice by ignoring classes absent from
   # both prediction and ground truth. Set true to count absent classes as IoU=0.

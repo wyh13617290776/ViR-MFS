@@ -140,7 +140,7 @@ def capture_project_state(trace_dir: str, project_root: str) -> None:
     """
     ensure_dir(trace_dir)
     root = Path(project_root)
-    for file_name in ("requirements.txt", "run_experiment.sh"):
+    for file_name in ("environment.yml", "run_experiment.sh"):
         source = root / file_name
         if source.exists():
             shutil.copy(source, Path(trace_dir) / file_name)

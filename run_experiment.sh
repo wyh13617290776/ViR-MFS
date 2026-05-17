@@ -9,7 +9,6 @@ set -euo pipefail
 #   ./run_experiment.sh 0 train
 #   ./run_experiment.sh 0,1,2,3 train
 #   ./run_experiment.sh 1 test
-#   ./run_experiment.sh 1 test config/params_fmb_legacy.yaml
 # ==============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

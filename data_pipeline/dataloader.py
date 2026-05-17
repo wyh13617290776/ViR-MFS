@@ -30,7 +30,7 @@ class VIFSDataset(Dataset):
                 keep original image sizes.
             label_resize_interpolation: Interpolation mode used when resizing
                 semantic labels. ``nearest`` preserves class ids. ``default``
-                reproduces the legacy ``PIL.Image.resize(size)`` behavior.
+                uses PIL's default resize behavior.
 
         Returns:
             None.

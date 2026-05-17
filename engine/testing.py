@@ -78,7 +78,7 @@ def test_model(config_path: str = "config/config.yaml", params_path: str = "conf
     dataset = VIFSDataset(
         mode="test",
         resize_size=tuple(test_cfg["resize_size"]),
-        label_resize_interpolation=test_cfg.get("label_resize_interpolation", "default"),
+        label_resize_interpolation=test_cfg.get("label_resize_interpolation", "nearest"),
         **injector.dataset_paths("test"),
     )
     loader = DataLoader(

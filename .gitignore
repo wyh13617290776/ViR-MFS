@@ -1,18 +1,20 @@
-# 预训练权重
+# Pretrained weights and model checkpoints
 model_data/
 
-# 训练得到的模型权重
+# Training outputs
 runs/
 runs_meta/
 
-# 测试结果（融合和分割图像）
+# Evaluation outputs
 test_results/
 
-# Python 缓存与虚拟环境
+# Python caches and local system files
 __pycache__/
 *.pyc
 .DS_Store
 
-# 虚拟环境
+# Local environments
+vir-mfs/
 metafusion_venv/
 venv/
+.venv/

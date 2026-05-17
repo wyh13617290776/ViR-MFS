@@ -61,7 +61,7 @@ def _build_loader(injector: ConfigInjector, split: str, batch_size: int, num_wor
     dataset = VIFSDataset(
         mode=split,
         resize_size=tuple(resize_size),
-        label_resize_interpolation=injector.test_config().get("label_resize_interpolation", "default") if split == "test" else injector.train_config().get("label_resize_interpolation", "nearest"),
+        label_resize_interpolation=injector.test_config().get("label_resize_interpolation", "nearest") if split == "test" else injector.train_config().get("label_resize_interpolation", "nearest"),
         **injector.dataset_paths(split),
     )
     loader = DataLoader(

@@ -300,7 +300,7 @@ class ConfigInjector:
         test_cfg.setdefault("num_workers", 4)
         test_cfg.setdefault("resize_size", [640, 480])
         test_cfg.setdefault("num_classes", self.train_config().get("num_classes", 9))
-        test_cfg.setdefault("label_resize_interpolation", "default")
+        test_cfg.setdefault("label_resize_interpolation", "nearest")
         test_cfg.setdefault("checkpoint_strict", False)
         test_cfg.setdefault("include_absent_classes_in_miou", False)
         visualization_cfg = dict(test_cfg.get("visualization", {}) or {})
