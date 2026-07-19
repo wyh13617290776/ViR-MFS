@@ -1,0 +1,72 @@
+# ==========================================
+# Model, training, and testing parameters.
+# ==========================================
+
+wavelet:
+  kernel_size: 5
+  wt_levels: 1
+  wt_type: "db1"
+  # This keeps the original asymmetric MWFM behavior: LL bands are fused,
+  # while high-frequency reconstruction uses visible-image bands only.
+  # Supported values: visible, infrared, mean, sum.
+  high_frequency_source: "visible"
+  # Supported values: static, learnable. Learnable initializes from
+  # high_frequency_source and then learns visible/infrared injection weights.
+  high_frequency_injection: "static"
+  high_frequency_init_strength: 4.0
+  high_frequency_temperature: 1.0
+
+train:
+  batch_size: 4
+  num_workers: 4
+  epochs: 300
+  # MSRS uses 9 valid ids: 0-8. FMB uses 15 valid ids: 0-14.
+  num_classes: 9
+  resize_size: [640, 480]   # [W, H]
+  label_resize_interpolation: "nearest"
+
+  # Learning rates.
+  lr_f: 5.0e-5
+  lr_seg: 5.0e-5
+  lr_all: 5.0e-4
+
+  # Meta-learning controls.
+  lambda_g: 0.1
+  inner_lr: 1.0e-5
+  inner_every: 3
+  inner_warmup: 1
+  eval_every: 1
+  include_absent_classes_in_miou: false
+  
+  use_amp: true
+  use_pretrained: true
+  skip_invalid_loss: true
+  grad_clip_norm: null
+
+  # Fine-tuning and resume are part of train.py. Set enabled=true and provide
+  # either an absolute path or a checkpoint name accepted by config.yaml.
+  resume:
+    enabled: false
+    checkpoint: ""
+    strict: true
+
+test:
+  batch_size: 1
+  num_workers: 4
+  # MSRS uses 9 valid ids: 0-8. FMB uses 15 valid ids: 0-14.
+  num_classes: 9
+  resize_size: [640, 480]
+  # Use "nearest" to preserve integer semantic class ids.
+  label_resize_interpolation: "nearest"
+  # Set true when a checkpoint must match the model exactly.
+  checkpoint_strict: false
+  # False follows common segmentation practice by ignoring classes absent from
+  # both prediction and ground truth. Set true to count absent classes as IoU=0.
+  include_absent_classes_in_miou: false
+  # Semantic visualization uses dataset palettes integrated in utils.
+  # palette: auto resolves from config.yaml -> dataset.name. Supported values:
+  # auto, MSRS, FMB.
+  visualization:
+    palette: "auto"
+    save_pred_color: true
+    save_label_color: true

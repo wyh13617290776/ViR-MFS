@@ -1,0 +1,29 @@
+name: vir-mfs
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.10
+  - pip
+  - pytorch=2.3.0
+  - torchvision=0.18.0
+  - pytorch-cuda=11.8
+  - numpy
+  - pillow
+  - pyyaml
+  - tqdm
+  - matplotlib
+  - scipy
+  - scikit-image
+  - scikit-learn
+  - pandas
+  - seaborn
+  - pywavelets
+  - tensorboard
+  - pip:
+      - opencv-python
+      - tensorboardX==2.2
+      - thop==0.0.31.post2005241907
+      - kornia==0.6.4

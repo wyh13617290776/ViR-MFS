@@ -1,0 +1,22 @@
+# ==========================================
+# Project path and runtime configuration.
+# ==========================================
+model_name: "SegFormer"
+
+backbone:
+  phi: "b0"                                                 # Backbone variant: b0, b1, b2, b3.
+  pretrained_dir: "model_data"                              # Directory for pretrained SegFormer backbone weights.
+
+dataset:
+  name: "MSRS"
+  root_dir: "../datasets"
+
+train:
+  save_base_dir: "runs"
+  
+test:
+  save_base_dir: "test_results"
+  # Short names such as "best_mIoU" and "meta_latest" are expanded to
+  # "{dataset}_{phi}_{name}.pth" inside the training output directory.
+  # Absolute paths and explicit "*.pth" file names are also supported.
+  checkpoint_name: "best_mIoU" # msrs_b0_meta_modify_1.pth
